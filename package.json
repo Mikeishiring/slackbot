@@ -1,0 +1,23 @@
+{
+  "name": "slack-bot-llm",
+  "version": "1.0.0",
+  "description": "Let people talk to your data through Slack + Claude",
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "dev": "tsx watch src/index.ts",
+    "test": "node --import tsx --test",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck && npm test"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
+    "@slack/bolt": "^4.1.0",
+    "dotenv": "^17.2.3"
+  },
+  "devDependencies": {
+    "@types/node": "^24.9.1",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}

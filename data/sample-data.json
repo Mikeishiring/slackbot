@@ -1,0 +1,92 @@
+[
+  {
+    "id": "item-001",
+    "title": "Q1 Product Roadmap Update",
+    "date": "2026-03-25",
+    "source": "internal-blog",
+    "tags": ["product", "roadmap", "q1"],
+    "summary": "New search features launching in April. Mobile app redesign pushed to Q2. API v3 on track for March 31 release.",
+    "content": "The product team shared the Q1 roadmap update. Key highlights: 1) Advanced search with filters ships April 7th. 2) Mobile app redesign moved to Q2 due to accessibility audit findings. 3) API v3 remains on track for March 31 with breaking changes to the /users endpoint. The team is prioritizing developer documentation for the API migration."
+  },
+  {
+    "id": "item-002",
+    "title": "Competitor Analysis: Acme Corp Series B",
+    "date": "2026-03-24",
+    "source": "market-intel",
+    "tags": ["competitors", "acme", "funding"],
+    "summary": "Acme Corp raised $45M Series B led by Sequoia. Expanding into enterprise segment. Hiring 30 engineers.",
+    "content": "Acme Corp announced a $45M Series B round led by Sequoia Capital. The funding will be used to expand their enterprise offering and hire approximately 30 engineers over the next two quarters. Their CEO mentioned plans to open a London office. This positions them as a direct competitor in the enterprise segment we're targeting for Q3."
+  },
+  {
+    "id": "item-003",
+    "title": "Customer Churn Report — February",
+    "date": "2026-03-20",
+    "source": "analytics",
+    "tags": ["churn", "customers", "metrics"],
+    "summary": "February churn at 3.2%, down from 4.1% in January. Main driver: improved onboarding flow reduced first-30-day churn by 40%.",
+    "content": "Monthly churn dropped to 3.2% in February, down from 4.1% in January. The primary driver was the new onboarding flow launched January 15th, which reduced first-30-day churn by 40%. Enterprise churn remains flat at 1.1%. SMB segment still elevated at 5.8%. Three enterprise accounts flagged as at-risk: Globex Corp (contract renewal April), Initech (support ticket volume 3x normal), Wayne Industries (champion left the company)."
+  },
+  {
+    "id": "item-004",
+    "title": "Engineering Postmortem: March 18 Outage",
+    "date": "2026-03-19",
+    "source": "engineering",
+    "tags": ["engineering", "incident", "postmortem"],
+    "summary": "45-minute outage caused by database migration timeout. Root cause: missing index on users table. No data loss.",
+    "content": "On March 18 at 14:23 UTC, the production database became unresponsive during a scheduled migration. The migration added a NOT NULL constraint to the users table, which required a full table scan on 2.3M rows. The missing index on the email column caused the operation to exceed the 30-second lock timeout. Service was restored at 15:08 UTC by rolling back the migration. Fix: add the index first in a separate migration, then apply the constraint. No data loss occurred."
+  },
+  {
+    "id": "item-005",
+    "title": "Industry Report: State of Developer Tools 2026",
+    "date": "2026-03-17",
+    "source": "research",
+    "tags": ["industry", "developer-tools", "trends"],
+    "summary": "AI-assisted development now used by 67% of developers. API-first companies growing 2.3x faster than UI-first. Developer experience is the #1 purchase driver.",
+    "content": "The annual State of Developer Tools report shows significant shifts. AI-assisted development adoption jumped from 34% to 67% year-over-year. Companies with API-first strategies are growing 2.3x faster than UI-first competitors. Developer experience has overtaken pricing as the #1 purchase driver for technical tools. The report surveyed 12,000 developers across 45 countries. Notable trend: internal developer platforms are now used by 41% of companies with 200+ engineers."
+  },
+  {
+    "id": "item-006",
+    "title": "Partnership Discussion: DataFlow Inc",
+    "date": "2026-03-15",
+    "source": "business-dev",
+    "tags": ["partnerships", "dataflow", "integration"],
+    "summary": "DataFlow interested in bi-directional integration. Their 8,000 customers would get access to our analytics. Revenue share model proposed.",
+    "content": "Met with DataFlow Inc leadership to discuss integration partnership. They have 8,000 active customers in the mid-market segment. Proposal: bi-directional data sync where their customers can pipe data into our analytics platform. Revenue model: 15% rev share on referred customers, or flat $50k/year partnership fee. Their VP of Product wants a technical POC by end of April. Key concern: their data format uses a proprietary schema that would require a custom adapter."
+  },
+  {
+    "id": "item-007",
+    "title": "Board Meeting Notes — March",
+    "date": "2026-03-12",
+    "source": "leadership",
+    "tags": ["board", "strategy", "financials"],
+    "summary": "ARR at $4.2M, 18% QoQ growth. Board approved hiring plan for 15 additional headcount. Series A extension discussion tabled to Q3.",
+    "content": "March board meeting summary. ARR reached $4.2M with 18% quarter-over-quarter growth. Net revenue retention at 112%. The board approved hiring 15 additional positions: 8 engineering, 4 sales, 2 customer success, 1 product. Discussion of a Series A extension was tabled until Q3 pending pipeline performance. Board member feedback: focus on enterprise pipeline conversion rate (currently 12%, target 20%) before raising."
+  },
+  {
+    "id": "item-008",
+    "title": "User Research: Search Feature Feedback",
+    "date": "2026-03-10",
+    "source": "product",
+    "tags": ["product", "research", "search", "ux"],
+    "summary": "8 user interviews completed. Top pain point: search doesn't understand natural language. Users want 'show me deals closing this month' not boolean filters.",
+    "content": "Completed 8 user research interviews on the search feature. Key findings: 1) 7 of 8 users tried natural language queries first before switching to filters. 2) Most common failed query pattern: time-based ('this week', 'last month', 'before Q2'). 3) Users expect search to understand context — 'my deals' should filter to their assignments. 4) Power users want saved searches. 5) Nobody uses the advanced filter panel (0 of 8 discovered it without prompting). Recommendation: prioritize natural language search over adding more filter options."
+  },
+  {
+    "id": "item-009",
+    "title": "Security Audit Results",
+    "date": "2026-03-08",
+    "source": "security",
+    "tags": ["security", "audit", "compliance"],
+    "summary": "Annual security audit complete. 2 medium findings (both patched), 0 critical. SOC 2 Type II certification renewed.",
+    "content": "The annual security audit by CrowdStrike is complete. Results: 0 critical findings, 2 medium findings (both patched within 48 hours), 5 low/informational. Medium findings: 1) API rate limiting not enforced on the /export endpoint — fixed by adding 100 req/min limit. 2) Session tokens not rotated after password change — fixed by invalidating all sessions on password update. SOC 2 Type II certification renewed for another year. Next audit scheduled for March 2027."
+  },
+  {
+    "id": "item-010",
+    "title": "Sales Pipeline Review — Week 12",
+    "date": "2026-03-22",
+    "source": "sales",
+    "tags": ["sales", "pipeline", "deals"],
+    "summary": "12 active deals worth $680K. 3 expected to close this month. Biggest risk: Globex Corp ($120K) went silent after demo.",
+    "content": "Weekly pipeline review. 12 active opportunities totaling $680K in pipeline value. Expected closes this month: Sterling Cooper ($85K, contract sent), Pied Piper ($45K, verbal yes), Hooli ($60K, procurement approved). At-risk deals: Globex Corp ($120K) — no response to 3 follow-ups after March 5 demo. Champion may have changed roles. Recommended action: reach out to VP Engineering directly. New this week: 2 inbound demos scheduled from the DevTools conference leads."
+  }
+]
