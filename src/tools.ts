@@ -125,23 +125,46 @@ function searchItems(
   limit = DEFAULT_LIMIT
 ): ItemPreview[] {
   const data = loadData();
-  const normalizedQuery = query.toLowerCase();
+  const queryTerms = query.toLowerCase().split(/\s+/).filter(Boolean);
+  if (queryTerms.length === 0) return [];
   const normalizedTag = tag?.toLowerCase();
 
-  return data
-    .filter((item) => {
-      const matchesQuery =
-        item.title.toLowerCase().includes(normalizedQuery) ||
-        item.summary.toLowerCase().includes(normalizedQuery) ||
-        (item.content ?? "").toLowerCase().includes(normalizedQuery);
-      const matchesTag =
-        !normalizedTag ||
-        item.tags.some((itemTag) => itemTag.toLowerCase() === normalizedTag);
-      return matchesQuery && matchesTag;
-    })
-    .sort(sortByDateDescending)
+  const scored: Array<{ item: Item; score: number }> = [];
+
+  for (const item of data) {
+    const matchesTag =
+      !normalizedTag ||
+      item.tags.some((itemTag) => itemTag.toLowerCase() === normalizedTag);
+    if (!matchesTag) continue;
+
+    const titleLower = item.title.toLowerCase();
+    const textLower = [
+      item.title,
+      item.summary,
+      item.content ?? "",
+      item.tags.join(" "),
+    ]
+      .join(" ")
+      .toLowerCase();
+
+    let score = 0;
+    for (const term of queryTerms) {
+      if (!textLower.includes(term)) continue;
+      score += titleLower.includes(term) ? 3 : 1;
+    }
+
+    if (score > 0) {
+      if (queryTerms.every((t) => textLower.includes(t))) {
+        score += queryTerms.length;
+      }
+      scored.push({ item, score });
+    }
+  }
+
+  return scored
+    .sort((a, b) => b.score - a.score || sortByDateDescending(a.item, b.item))
     .slice(0, limit)
-    .map(toPreview);
+    .map(({ item }) => toPreview(item));
 }
 
 function getItem(id: string): Item | { error: string } {

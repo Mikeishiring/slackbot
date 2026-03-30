@@ -116,6 +116,16 @@ test("limit is clamped to max 50", async () => {
   assert.ok(result.length <= 50);
 });
 
+test("search_items scores multi-word queries by word overlap", async () => {
+  const result = (await runTool("search_items", {
+    query: "series b funding",
+    limit: 5,
+  })) as Array<Record<string, unknown>>;
+
+  assert.ok(result.length > 0, "Multi-word query should match items");
+  assert.equal(result[0]!["id"], "item-002", "Acme Series B should rank first");
+});
+
 test("runTool rejects non-string tag values", async () => {
   await assert.rejects(
     () => runTool("search_items", { query: "test", tag: 123 }),

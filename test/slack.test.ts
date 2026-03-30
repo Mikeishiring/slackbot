@@ -78,6 +78,11 @@ test("shouldHandleDirectMessage rejects malformed events", () => {
   assert.equal(shouldHandleDirectMessage({ channel_type: "im" }), false);
 });
 
+const mockReactions = () => ({
+  add: async () => {},
+  remove: async () => {},
+});
+
 test("handleIncomingMessage sends a fallback reply when processing fails", async () => {
   const sent: Array<{ text: string; thread_ts: string }> = [];
   const client = {
@@ -86,6 +91,7 @@ test("handleIncomingMessage sends a fallback reply when processing fails", async
         messages: [{ text: "user: prior message" }],
       }),
     },
+    reactions: mockReactions(),
   };
   const originalConsoleError = console.error;
   console.error = () => {};
@@ -115,12 +121,38 @@ test("handleIncomingMessage sends a fallback reply when processing fails", async
   ]);
 });
 
+test("handleIncomingMessage adds eyes reaction while processing and removes after", async () => {
+  const reactions: string[] = [];
+  const client = {
+    conversations: {
+      replies: async () => ({ messages: [] }),
+    },
+    reactions: {
+      add: async ({ name }: { name: string }) => { reactions.push(`+${name}`); },
+      remove: async ({ name }: { name: string }) => { reactions.push(`-${name}`); },
+    },
+  };
+
+  await handleIncomingMessage(
+    client,
+    async (message) => { message; },
+    "C1",
+    "100.000",
+    "hello",
+    async () => "response",
+    "100.001"
+  );
+
+  assert.deepEqual(reactions, ["+eyes", "-eyes"]);
+});
+
 test("handleIncomingMessage sends successful response in thread", async () => {
   const sent: Array<{ text: string; thread_ts: string }> = [];
   const client = {
     conversations: {
       replies: async () => ({ messages: [] }),
     },
+    reactions: mockReactions(),
   };
 
   await handleIncomingMessage(

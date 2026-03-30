@@ -95,6 +95,7 @@ In Slack app settings:
    - `app_mentions:read`
    - `chat:write`
    - `channels:history`
+   - `reactions:write`
    - `im:history`
 5. Subscribe to bot events:
    - `app_mention`

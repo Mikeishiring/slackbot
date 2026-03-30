@@ -14,6 +14,12 @@ import type {
   ToolResultBlockParam,
 } from "@anthropic-ai/sdk/resources/messages.js";
 
+import {
+  DEFAULT_ANTHROPIC_MODEL,
+  DEFAULT_ANTHROPIC_REQUEST_TIMEOUT_MS,
+  DEFAULT_ANTHROPIC_MAX_RETRIES,
+} from "./config.js";
+
 const SYSTEM_PROMPT = `You're a helpful teammate that answers questions using the tools available to you.
 
 Keep answers short - one screen max. Lead with the answer, context second.
@@ -21,9 +27,6 @@ Use Slack formatting: *bold* for emphasis, bullet points (-) for lists.
 If you can't find what someone's looking for, say so and suggest a different search.
 When you reference data, be specific - include names, dates, and numbers.`;
 
-const DEFAULT_MODEL = "claude-opus-4-20250918";
-const DEFAULT_REQUEST_TIMEOUT_MS = 15_000;
-const DEFAULT_MAX_RETRIES = 2;
 const MAX_TOOL_CALLS = 10;
 const MAX_THREAD_HISTORY_MESSAGES = 12;
 const MAX_HISTORY_MESSAGE_CHARS = 600;
@@ -50,10 +53,10 @@ interface Agent {
 export function createAgent(config: AgentConfig): Agent {
   const client = new Anthropic({
     apiKey: config.anthropicApiKey,
-    maxRetries: config.maxRetries ?? DEFAULT_MAX_RETRIES,
-    timeout: config.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
+    maxRetries: config.maxRetries ?? DEFAULT_ANTHROPIC_MAX_RETRIES,
+    timeout: config.requestTimeoutMs ?? DEFAULT_ANTHROPIC_REQUEST_TIMEOUT_MS,
   });
-  const model = config.model ?? DEFAULT_MODEL;
+  const model = config.model ?? DEFAULT_ANTHROPIC_MODEL;
 
   return {
     respond: async (text: string, threadHistory: string[]): Promise<string> => {

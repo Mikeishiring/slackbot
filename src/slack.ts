@@ -27,7 +27,22 @@ interface ThreadHistoryResult {
   messages?: ThreadHistoryMessage[];
 }
 
-export interface SlackHistoryClient {
+export interface SlackReactionsClient {
+  reactions: {
+    add: (params: {
+      channel: string;
+      timestamp: string;
+      name: string;
+    }) => Promise<unknown>;
+    remove: (params: {
+      channel: string;
+      timestamp: string;
+      name: string;
+    }) => Promise<unknown>;
+  };
+}
+
+export interface SlackHistoryClient extends SlackReactionsClient {
   conversations: {
     replies: (params: {
       channel: string;
@@ -81,7 +96,8 @@ export async function startSlackBot(config: SlackConfig): Promise<void> {
       event.channel,
       event.thread_ts ?? event.ts,
       text,
-      config.onMessage
+      config.onMessage,
+      event.ts
     );
   });
 
@@ -97,7 +113,8 @@ export async function startSlackBot(config: SlackConfig): Promise<void> {
       event.channel,
       event.thread_ts ?? event.ts,
       text,
-      config.onMessage
+      config.onMessage,
+      event.ts
     );
   });
 
@@ -137,8 +154,12 @@ export async function handleIncomingMessage(
   channel: string,
   threadTs: string,
   text: string,
-  onMessage: SlackConfig["onMessage"]
+  onMessage: SlackConfig["onMessage"],
+  messageTs?: string
 ): Promise<void> {
+  const reactionTs = messageTs ?? threadTs;
+  await addReaction(client, channel, reactionTs, "eyes");
+
   try {
     const threadHistory = await getThreadHistory(client, channel, threadTs);
     const response = await onMessage(text, threadHistory);
@@ -151,6 +172,34 @@ export async function handleIncomingMessage(
     } catch (replyError) {
       console.error("Failed to send Slack error message", replyError);
     }
+  } finally {
+    await removeReaction(client, channel, reactionTs, "eyes");
+  }
+}
+
+async function addReaction(
+  client: SlackReactionsClient,
+  channel: string,
+  timestamp: string,
+  name: string
+): Promise<void> {
+  try {
+    await client.reactions.add({ channel, timestamp, name });
+  } catch {
+    // Non-critical — don't block the response
+  }
+}
+
+async function removeReaction(
+  client: SlackReactionsClient,
+  channel: string,
+  timestamp: string,
+  name: string
+): Promise<void> {
+  try {
+    await client.reactions.remove({ channel, timestamp, name });
+  } catch {
+    // Non-critical — reaction may have been manually removed
   }
 }
 

@@ -14,6 +14,16 @@ Clone. Set 3 keys. Run.
 
 ---
 
+## ✨ What You Get
+
+- **Word-overlap search** — natural queries like "series b funding" find the right items, not just exact substrings. Title matches rank higher.
+- **👀 Processing indicator** — the bot reacts with :eyes: when it receives your message, removes it when the reply lands. Your team knows it's working.
+- **Thread context** — follow-up questions work naturally. The bot reads thread history before responding.
+- **Tool loop** — Claude picks the right tool, reads the results, and replies. Up to 10 tool calls per message.
+- **Single config source** — model, timeout, and retry defaults live in one place. No drift between files.
+
+---
+
 ## ⚡ How It Works
 
 ```mermaid
@@ -97,6 +107,7 @@ graph LR
    - `app_mentions:read` — see when someone @mentions the bot
    - `chat:write` — post replies
    - `channels:history` — read thread history for context
+   - `reactions:write` — add/remove the 👀 processing indicator
    - `im:history` — read DMs *(skip this for channel-only mode)*
 5. **Install to Workspace** → copy the bot token (starts with `xoxb-`)
 6. **Event Subscriptions** → toggle on → subscribe to:
@@ -154,7 +165,7 @@ If you're using an AI coding agent to set this up:
 
 1. **Slack App** — use the **App Manifest** JSON editor (`Settings → App Manifests`), not individual pages. Set `socket_mode_enabled: true`, scopes + events in one shot.
 2. **Tokens** — app-level token with `connections:write`, bot token from OAuth. Both in `.env`.
-3. **Scopes** — add `reactions:write` if you implement a processing indicator. Skip `im:history` for channel-only mode.
+3. **Scopes** — `reactions:write` is included by default for the 👀 processing indicator. Skip `im:history` for channel-only mode.
 4. **Railway** — set vars via Raw Editor or GraphQL (`variableCollectionUpsert`), not one-by-one.
 5. **Verify** — `npm run check` locally, then push. Railway auto-deploys.
 
@@ -344,6 +355,7 @@ Read this before deploying. This bot runs code that has the Slack permissions yo
 | `app_mentions:read` | Read any message that @mentions the bot |
 | `chat:write` | Post messages to any channel the bot is in |
 | `channels:history` | Read message history in public channels the bot is in |
+| `reactions:write` | Add/remove emoji reactions (used for 👀 processing indicator) |
 
 That's it. The bot ships with these scopes and nothing more.
 
