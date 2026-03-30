@@ -14,6 +14,17 @@ test("normalizeMentionText removes bot mentions and extra whitespace", () => {
   );
 });
 
+test("normalizeMentionText handles multiple mentions", () => {
+  assert.equal(
+    normalizeMentionText("<@U111> <@U222> hello there"),
+    "hello there"
+  );
+});
+
+test("normalizeMentionText returns empty string for mention-only messages", () => {
+  assert.equal(normalizeMentionText("<@U12345>"), "");
+});
+
 test("shouldHandleDirectMessage ignores bot and subtype events", () => {
   assert.equal(
     shouldHandleDirectMessage({
@@ -46,6 +57,25 @@ test("shouldHandleDirectMessage ignores bot and subtype events", () => {
     }),
     true
   );
+});
+
+test("shouldHandleDirectMessage rejects non-im channel types", () => {
+  assert.equal(
+    shouldHandleDirectMessage({
+      channel_type: "channel",
+      channel: "C1",
+      ts: "123.456",
+      text: "hello",
+    }),
+    false
+  );
+});
+
+test("shouldHandleDirectMessage rejects malformed events", () => {
+  assert.equal(shouldHandleDirectMessage(null), false);
+  assert.equal(shouldHandleDirectMessage(undefined), false);
+  assert.equal(shouldHandleDirectMessage("string"), false);
+  assert.equal(shouldHandleDirectMessage({ channel_type: "im" }), false);
 });
 
 test("handleIncomingMessage sends a fallback reply when processing fails", async () => {
@@ -83,4 +113,32 @@ test("handleIncomingMessage sends a fallback reply when processing fails", async
       thread_ts: "123.456",
     },
   ]);
+});
+
+test("handleIncomingMessage sends successful response in thread", async () => {
+  const sent: Array<{ text: string; thread_ts: string }> = [];
+  const client = {
+    conversations: {
+      replies: async () => ({ messages: [] }),
+    },
+  };
+
+  await handleIncomingMessage(
+    client,
+    async (message) => {
+      sent.push(message);
+    },
+    "C1",
+    "999.000",
+    "what's new?",
+    async (text, history) => {
+      assert.equal(text, "what's new?");
+      assert.ok(Array.isArray(history));
+      return "Here's what's new!";
+    }
+  );
+
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0]?.text, "Here's what's new!");
+  assert.equal(sent[0]?.thread_ts, "999.000");
 });

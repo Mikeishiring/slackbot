@@ -26,6 +26,28 @@ test("buildMessages trims history to the most recent messages", () => {
   assert.deepEqual(messages.at(-1), { role: "user", content: "latest" });
 });
 
+test("buildMessages handles empty history", () => {
+  const messages = buildMessages([], "hello");
+
+  assert.equal(messages.length, 1);
+  assert.deepEqual(messages[0], { role: "user", content: "hello" });
+});
+
+test("buildMessages skips blank history entries", () => {
+  const messages = buildMessages(["user: ", "assistant:   ", "user: real message"], "latest");
+
+  // Blank entries should be filtered out
+  assert.ok(messages.length >= 1);
+  assert.deepEqual(messages.at(-1), { role: "user", content: "latest" });
+});
+
+test("buildMessages replaces empty user text with placeholder", () => {
+  const messages = buildMessages([], "   ");
+
+  assert.equal(messages.length, 1);
+  assert.deepEqual(messages[0], { role: "user", content: "(empty message)" });
+});
+
 test("runConversation executes tool calls and joins final text blocks", async () => {
   const createCalls: Array<Record<string, unknown>> = [];
   const responses = [
@@ -131,4 +153,67 @@ test("runConversation returns a clear fallback when the model request throws", a
   } finally {
     console.error = originalConsoleError;
   }
+});
+
+test("runConversation handles tool execution errors gracefully", async () => {
+  const responses = [
+    {
+      stop_reason: "tool_use",
+      content: [
+        {
+          type: "tool_use",
+          id: "tool-1",
+          name: "failing_tool",
+          input: {},
+        },
+      ],
+    },
+    {
+      stop_reason: "end_turn",
+      content: [{ type: "text", text: "The tool failed, sorry." }],
+    },
+  ];
+
+  const client = {
+    messages: {
+      create: async () => {
+        const nextResponse = responses.shift();
+        if (!nextResponse) throw new Error("Unexpected call");
+        return nextResponse;
+      },
+    },
+  } as unknown as Anthropic;
+
+  const output = await runConversation(
+    client,
+    "test-model",
+    [],
+    async () => {
+      throw new Error("database connection lost");
+    },
+    buildMessages([], "search for something")
+  );
+
+  assert.equal(output, "The tool failed, sorry.");
+});
+
+test("runConversation returns fallback on unknown stop reason", async () => {
+  const client = {
+    messages: {
+      create: async () => ({
+        stop_reason: "content_filter",
+        content: [],
+      }),
+    },
+  } as unknown as Anthropic;
+
+  const output = await runConversation(
+    client,
+    "test-model",
+    [],
+    async () => ({}),
+    buildMessages([], "anything")
+  );
+
+  assert.match(output, /couldn't complete/i);
 });
