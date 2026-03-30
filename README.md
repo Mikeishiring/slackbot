@@ -1,6 +1,6 @@
-# 🤖 Slack Bot + LLM Starter
+# 🤖 Slack Bot LLM Starter
 
-> Give your team an AI teammate that answers questions from your data — right inside Slack.
+> Let your team talk to your data, tools, and apps — directly from Slack.
 
 ```
 User: "What's new this week?"
@@ -8,7 +8,9 @@ Bot:  "3 items this week — Q1 roadmap update, Acme's Series B,
        and the sales pipeline review..."
 ```
 
-Clone. Set 3 keys. Run. That's it.
+Connect it to a database, an API, an internal tool — whatever your team needs to query. They just ask the bot in plain English.
+
+Clone. Set 3 keys. Run.
 
 ---
 
@@ -16,12 +18,12 @@ Clone. Set 3 keys. Run. That's it.
 
 ```mermaid
 graph LR
-    A["💬 Slack"] -->|message| B["🧠 Agent"]
-    B -->|tool call| C["🔧 Tools"]
-    C -->|query| D["📦 Your Data"]
-    D -->|results| C
-    C -->|response| B
-    B -->|reply| A
+    A["💬 Slack"] -->|"your team asks a question"| B["🧠 Agent"]
+    B -->|"picks the right tool"| C["🔧 Tools"]
+    C -->|"queries"| D["📦 Your Data"]
+    D -->|"results"| C
+    C -->|"answers"| B
+    B -->|"replies in thread"| A
 
     style A fill:#4A154B,color:#fff,stroke:#4A154B
     style B fill:#D97706,color:#fff,stroke:#D97706
@@ -29,7 +31,7 @@ graph LR
     style D fill:#059669,color:#fff,stroke:#059669
 ```
 
-Someone messages your bot in Slack. Claude reads the message, decides which tools to call, gets data back, and replies in the thread. You control what tools exist.
+Someone messages your bot. Claude figures out what they're asking, calls the right tool, gets data back, and replies in the thread. You decide what tools exist and what data they can access.
 
 **4 files, 1 extension point:**
 
@@ -37,7 +39,7 @@ Someone messages your bot in Slack. Claude reads the message, decides which tool
 |------|-------------|
 | `src/slack.ts` | Receives messages, posts replies |
 | `src/agent.ts` | Claude API + tool loop |
-| `src/tools.ts` | **Your tools — edit this first** |
+| `src/tools.ts` | **Your tools — the one file you customize** |
 | `src/config.ts` | Environment variables + defaults |
 
 ---
@@ -66,9 +68,9 @@ graph LR
     style E fill:#2563EB,color:#fff,stroke:none
 ```
 
-**By default, this bot stores nothing.** No database, no logs, no conversation history. Messages live in Slack. API calls go to Anthropic (see their [data retention policy](https://www.anthropic.com/policies)). That's it.
+**Out of the box, this bot stores nothing.** No database, no logs, no conversation history. Messages live in Slack. API calls go to Anthropic (see their [data retention policy](https://www.anthropic.com/policies)).
 
-If you add a database later, you're now storing conversations — think about encryption, retention, and access controls before you do.
+> **If you add things — a database, an MCP server, a third-party API — those things can store data.** That's where you need to be careful. Each integration you add is a new place where conversations or query results might be logged, cached, or persisted. See [Security](#-security) for what to watch for.
 
 ---
 
@@ -131,24 +133,28 @@ npm start
 
 </details>
 
+**Not technical?** You can skip the terminal entirely. Install the [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI with the Chrome extension, open this repo, and ask Claude to set everything up for you — Slack app, Anthropic key, Railway deployment, all of it. It can use your browser to click through the setup pages autonomously.
+
 ### Step 4: Test It
 
 1. Invite the bot to a channel: `/invite @YourBotName`
 2. Send: `@YourBotName what's new this week?`
-3. Also try a DM — just message the bot directly
+3. Try a DM too — just message the bot directly
 
-Expected: the bot replies in a thread with information from the sample dataset.
+Expected: the bot replies in a thread using the sample dataset.
 
-`npm run check` runs both linting and tests locally.
+`npm run check` runs linting and tests locally.
 
 <details>
 <summary>🤖 <strong>Agent / automated setup</strong> (Claude Code, Cursor, Codex)</summary>
 
 <br/>
 
+If you're using an AI coding agent to set this up:
+
 1. **Slack App** — use the **App Manifest** JSON editor (`Settings → App Manifests`), not individual pages. Set `socket_mode_enabled: true`, scopes + events in one shot.
 2. **Tokens** — app-level token with `connections:write`, bot token from OAuth. Both in `.env`.
-3. **Scopes** — add `reactions:write` if you implement the 👀 processing indicator. Skip `im:history` for channel-only mode.
+3. **Scopes** — add `reactions:write` if you implement a processing indicator. Skip `im:history` for channel-only mode.
 4. **Railway** — set vars via Raw Editor or GraphQL (`variableCollectionUpsert`), not one-by-one.
 5. **Verify** — `npm run check` locally, then push. Railway auto-deploys.
 
@@ -175,7 +181,7 @@ Expected: the bot replies in a thread with information from the sample dataset.
 
 ### The Tool Loop
 
-Here's exactly what happens when someone messages your bot:
+Here's what happens every time someone messages your bot:
 
 ```mermaid
 sequenceDiagram
@@ -191,7 +197,7 @@ sequenceDiagram
     A-->>S: "Acme announced a $45M Series B led by Sequoia..."
 ```
 
-Claude decides which tools to call, how many times (up to 10), and how to summarize the results. You define what tools exist and what data they return.
+Claude decides which tools to call, how many times (up to 10), and how to phrase the answer. You define what tools exist and what data they return.
 
 ### What's Included
 
@@ -207,13 +213,13 @@ The starter ships with 3 read-only tools against a sample JSON file:
 
 ## 🔧 Connect Your Data
 
-Open `src/tools.ts` — three things to change:
+This is where you make it yours. The bot can talk to anything — a database, a REST API, an internal tool, a spreadsheet, a CRM. You're really just answering three questions:
 
 ```mermaid
 graph TD
-    A["1️⃣ Tool Definitions"] -->|"what can Claude call?"| B["Describe inputs + purpose"]
-    C["2️⃣ Tool Implementations"] -->|"what runs when called?"| D["Your query logic"]
-    E["3️⃣ Data Source"] -->|"where does data live?"| F["JSON → DB / API / MCP"]
+    A["1️⃣ What can your team ask?"] -->|"tool definitions"| B["Search, lookup, report, summarize..."]
+    C["2️⃣ Where does the answer live?"] -->|"data source"| D["Database, API, file, MCP server..."]
+    E["3️⃣ How do you get it?"] -->|"tool implementation"| F["SQL query, fetch call, SDK method..."]
 
     style A fill:#2563EB,color:#fff,stroke:none
     style C fill:#D97706,color:#fff,stroke:none
@@ -223,7 +229,9 @@ graph TD
     style F fill:#065f46,color:#fff,stroke:none
 ```
 
-**Swap the JSON file for a database:**
+Open `src/tools.ts` and swap the sample data for your real source.
+
+**Connect a database:**
 ```typescript
 import postgres from "postgres";
 const sql = postgres(process.env.DATABASE_URL);
@@ -233,7 +241,7 @@ function searchItems(query: string) {
 }
 ```
 
-**Or call a REST API:**
+**Call a REST API:**
 ```typescript
 async function searchItems(query: string) {
   const res = await fetch(`https://api.example.com/search?q=${query}`);
@@ -241,9 +249,13 @@ async function searchItems(query: string) {
 }
 ```
 
+**Some ideas:** connect it to your CRM so the team can ask "what deals closed this week?", hook it up to your analytics API for "how's traffic looking?", or point it at an internal wiki so people can ask "what's our refund policy?" — anything your team currently has to go dig for manually.
+
 ---
 
 ## 📈 How It Scales
+
+You start with one file and three tools. As you add more, the structure grows with you:
 
 ```mermaid
 graph LR
@@ -282,13 +294,15 @@ graph LR
     style H fill:#92400e,color:#fff,stroke:none
 ```
 
-`agent.ts` never changes. It imports `tools` and `runTool` — doesn't matter if that's one file or ten.
+The key thing: `agent.ts` never changes. It imports `tools` and `runTool` from whatever you give it — one file, a folder of files, or a mix of local tools and external MCP servers. You can keep adding capabilities without touching the core.
+
+When you outgrow a single file, split `tools.ts` into a `tools/` folder. When you want to connect external services, add MCP servers alongside your local tools. The bot doesn't care where the tools come from.
 
 ---
 
 ## 🔌 Scaling with MCP
 
-[Model Context Protocol](https://modelcontextprotocol.io) lets you connect external tool servers instead of writing everything in `tools.ts`.
+[Model Context Protocol](https://modelcontextprotocol.io) lets you plug in external tool servers instead of coding everything in `tools.ts`. Think of it like adding plugins.
 
 ```mermaid
 graph LR
@@ -315,13 +329,13 @@ graph LR
 | **Setup** | Edit one file | Run a server + connect |
 | **Trust** | You wrote it | Audit what it exposes |
 
-**Start local.** Move to MCP when you need multiple bots on the same data, or a pre-built server already does what you need.
+**Start local.** Move to MCP when you need multiple bots sharing the same data, or when a pre-built MCP server already does what you need.
 
 ---
 
 ## 🛡️ Security
 
-Running an LLM in Slack creates new attack surface. Here's the threat model:
+Running an LLM in Slack is powerful, but it opens up new surface area. Here's what to think about.
 
 ```mermaid
 graph TB
@@ -354,9 +368,20 @@ graph TB
     style I fill:#DC2626,color:#fff,stroke:none
 ```
 
+### The Big Rule
+
+**If you connect it, assume Claude can access everything in it.** A database, an API, an MCP server — whatever you plug in, a clever user can potentially get Claude to query anything that connection can reach. System prompt instructions like "never return passwords" are suggestions, not walls. They can be bypassed through prompt injection.
+
+This isn't a flaw — it's how LLMs work. Plan for it:
+
+- Keep tools **read-only** by default — if the worst case is a search query, injection is harmless
+- **Scope your database credentials** — read-only replica, only the tables the bot needs, row-level security
+- **Don't put secrets in the system prompt** — assume it can be extracted
+- **Validate tool inputs** in `runTool()` — don't blindly trust what Claude passes in
+
 ### Slack Scope Discipline
 
-Every OAuth scope is an attack surface. Ship with the minimum:
+Every OAuth scope you add is a door you're opening. Ship with the minimum:
 
 | Scope | Risk | Guidance |
 |-------|------|----------|
@@ -368,27 +393,15 @@ Every OAuth scope is an attack surface. Ship with the minimum:
 ### Channel & Tool Scoping
 
 - **Channel allowlist** — check `event.channel` in `slack.ts` to restrict where the bot responds
-- **Read-only tools first** — write tools should require confirmation
-- **User allowlist** — restrict who can trigger the bot if needed
-
-> `search_items` is safe. `delete_items` or `run_sql` is a loaded gun.
+- **Read-only tools first** — add write tools only when needed, and put them behind confirmation
+- **User allowlist** — restrict who can trigger the bot if it has access to sensitive data
 
 ### Third-Party & MCP Trust
 
-- Only connect MCP servers **you control or trust** — a malicious server can inject prompts via tool results
-- Audit tool lists before connecting (`client.listTools()`)
-- Run MCP in the same private network — not on the public internet
-- **Local tools first** — don't add an MCP dependency when `tools.ts` works fine
-
-### Prompt Injection
-
-**An LLM is not a security boundary.** If you give the bot a database connection, assume a skilled user can extract any data reachable by that connection. "Never return PII" in a system prompt is a guideline, not a guardrail — it can be bypassed.
-
-- Keep tools **read-only** — limits damage even if injection succeeds
-- **Don't put secrets in the system prompt** — assume it can be extracted
-- **Validate tool inputs** in `runTool()` — don't blindly trust Claude's parameters
-- **Scope database credentials** — read-only replica, row-level security
-- **Enforce access at the data layer**, never at the prompt layer
+- Only connect MCP servers **you control or trust** — a malicious server can inject prompts through tool results
+- Audit what tools a server exposes before connecting (`client.listTools()`)
+- Run MCP servers in the same private network as the bot — not on the public internet
+- **If you can do it in `tools.ts`, do it there** — don't add an external dependency you don't need
 
 ### Keys & Cost
 
@@ -401,13 +414,16 @@ Every OAuth scope is an attack surface. Ship with the minimum:
 
 ## 🚂 Deploy
 
+**Locally:**
 ```bash
-npm start   # local development
+npm start
 ```
 
 **Railway** (recommended): Push to GitHub → New Project → Deploy from GitHub → add env vars → done. Logs should show `Bot is running (Socket Mode)`.
 
-**Other hosts:** Fly.io, Render, DigitalOcean, Docker — anything that runs `npm start` and stays alive. No public URL needed.
+**Other hosts:** Fly.io, Render, DigitalOcean, Docker — anything that runs `npm start` and stays alive. No public URL needed — Socket Mode connects outbound.
+
+**Not technical?** Use [Claude Code](https://docs.anthropic.com/en/docs/claude-code) with the Chrome extension to deploy for you. Ask it to create a Railway project, set your environment variables, and push — it can handle the entire deployment through your browser.
 
 ---
 
@@ -432,7 +448,7 @@ npm start   # local development
 | Anthropic API | ~$5–50 depending on usage |
 | Railway | ~$5–20 |
 
-**What drives cost:** Every message = one or more API calls. Longer tool responses and deeper threads use more tokens. A team of 10 with moderate usage runs ~$10–20/month.
+**What drives cost:** Every message is one or more API calls. Longer tool responses and deeper threads use more tokens. A team of 10 with moderate usage runs about $10–20/month.
 
 ---
 
@@ -442,7 +458,7 @@ npm start   # local development
 |---------|-----|
 | Bot doesn't respond | Check scopes + event subscriptions. Reinstall app after changes. |
 | `Bot is running` but no replies | Invite the bot: `/invite @YourBotName` |
-| `not_found_error` on model | Check `ANTHROPIC_MODEL` — use a valid model ID |
+| `not_found_error` on model | Check `ANTHROPIC_MODEL` is a valid model ID |
 | Socket keeps disconnecting | Check `SLACK_APP_TOKEN` starts with `xapp-` |
 | High API costs | Set spend cap in Anthropic Console. Reduce tool response sizes. |
 | `Missing required environment variable` | Check `.env` has all 3 required vars filled in |
