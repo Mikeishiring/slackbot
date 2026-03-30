@@ -335,7 +335,37 @@ graph LR
 
 ## 🛡️ Security
 
-Running an LLM in Slack is powerful, but it opens up new surface area. Here's what to think about.
+Read this before deploying. This bot runs code that has the Slack permissions you granted it.
+
+### What the bot can do with its current permissions
+
+| Scope | What it allows |
+|-------|---------------|
+| `app_mentions:read` | Read any message that @mentions the bot |
+| `chat:write` | Post messages to any channel the bot is in |
+| `channels:history` | Read message history in public channels the bot is in |
+
+That's it. The bot ships with these scopes and nothing more.
+
+### The trust model
+
+When you deploy this bot, you're trusting three things:
+
+**The code in this repo.** `tools.ts` defines what the bot actually does. Anyone with write access to the repo or the deployment can change what happens when the bot is mentioned. A malicious change to `tools.ts` could make the bot read channel history and exfiltrate it, post misleading messages, or misuse the Slack API. Audit `tools.ts` before deploying — it's the only file that should change.
+
+**The Anthropic API.** Claude processes your Slack messages. Anything said to the bot goes through Anthropic's API. Review their [data usage policy](https://www.anthropic.com/policies).
+
+**Your deployment platform.** Whoever has access to your Railway/hosting environment can see your tokens and modify the running code.
+
+### What this bot does NOT do
+
+- It does **not** read DMs (no `im:history` scope)
+- It does **not** access private channels (no `groups:history` scope)
+- It does **not** manage channels, users, or workspace settings
+- It does **not** store messages — thread history is fetched on demand and discarded after the response
+- It does **not** have a database — it's completely stateless
+
+### Recommendations
 
 ```mermaid
 graph TB
@@ -345,14 +375,14 @@ graph TB
         C["Socket Mode — no public URL"]
     end
 
-    subgraph "🟡 Watch Carefully"
-        D["Slack scope creep"]
-        E["Unscoped channel access"]
+    subgraph "🟡 Watch When Extending"
+        D["Adding Slack scopes"]
+        E["Connecting a database"]
         F["No rate limiting on API spend"]
     end
 
-    subgraph "🔴 High Risk if Added"
-        G["Database with write access"]
+    subgraph "🔴 High Risk"
+        G["Write tools without confirmation"]
         H["Untrusted MCP servers"]
         I["Secrets in system prompt"]
     end
@@ -368,47 +398,42 @@ graph TB
     style I fill:#DC2626,color:#fff,stroke:none
 ```
 
-### The Big Rule
+**1. Audit `tools.ts` before deploying.** It's the only file that should change. If you see modifications to `slack.ts`, `agent.ts`, or `index.ts` in a PR, understand why before merging.
 
-**If you connect it, assume Claude can access everything in it.** A database, an API, an MCP server — whatever you plug in, a clever user can potentially get Claude to query anything that connection can reach. System prompt instructions like "never return passwords" are suggestions, not walls. They can be bypassed through prompt injection.
+**2. Limit channel access.** Only invite the bot to channels where you want it. It can only read history in channels it's been invited to.
+
+**3. Use minimal scopes.** This bot intentionally does not request `im:history` (DMs) or `groups:history` (private channels). If you don't need a scope, don't add it. Security here is about omission — you secure it by not granting access, not by configuring something extra.
+
+**4. Rotate tokens if you suspect compromise.** Revoke and regenerate both the bot token and app token from [api.slack.com/apps](https://api.slack.com/apps).
+
+**5. Pin your dependencies.** Run `npm audit` before deploying. Supply chain attacks through npm packages are a real vector.
+
+**6. Keep the Anthropic API key scoped.** Use a dedicated key for this bot, not your org-wide key. Set a [monthly spend cap](https://console.anthropic.com) — there's no built-in rate limiting.
+
+### If you connect a database
+
+**An LLM is not a security boundary.** If you give the bot a database connection, assume a skilled user can get Claude to query anything that connection can reach. System prompt instructions like "never return PII" are suggestions, not walls — they can be bypassed through prompt injection.
 
 This isn't a flaw — it's how LLMs work. Plan for it:
 
-- Keep tools **read-only** by default — if the worst case is a search query, injection is harmless
-- **Scope your database credentials** — read-only replica, only the tables the bot needs, row-level security
+- Keep tools **read-only** — if the worst case is a search query, injection is harmless
+- **Scope your credentials** — read-only replica, only the tables the bot needs, row-level security
 - **Don't put secrets in the system prompt** — assume it can be extracted
 - **Validate tool inputs** in `runTool()` — don't blindly trust what Claude passes in
+- **Enforce access at the data layer** (row-level security, view permissions), never at the prompt layer
 
-### Slack Scope Discipline
+### If you connect MCP servers
 
-Every OAuth scope you add is a door you're opening. Ship with the minimum:
+MCP servers are powerful — and that's the risk. When you connect one, you're giving Claude access to whatever that server exposes.
 
-| Scope | Risk | Guidance |
-|-------|------|----------|
-| `chat:write` | Low | Required — bot replies |
-| `channels:history` | Medium | Only channels bot is invited to |
-| `files:write` | **High** | Add only if a tool needs it |
-| `admin.*` | **Critical** | Never give to a bot |
-
-### Channel & Tool Scoping
-
-- **Channel allowlist** — check `event.channel` in `slack.ts` to restrict where the bot responds
-- **Read-only tools first** — add write tools only when needed, and put them behind confirmation
-- **User allowlist** — restrict who can trigger the bot if it has access to sensitive data
-
-### Third-Party & MCP Trust
-
-- Only connect MCP servers **you control or trust** — a malicious server can inject prompts through tool results
-- Audit what tools a server exposes before connecting (`client.listTools()`)
+- Only connect servers **you control or trust** — a malicious server can inject prompts through tool results
+- **Audit tool lists** before connecting (`client.listTools()`)
 - Run MCP servers in the same private network as the bot — not on the public internet
 - **If you can do it in `tools.ts`, do it there** — don't add an external dependency you don't need
 
-### Keys & Cost
+### TL;DR
 
-- Never commit `.env` (gitignored by default)
-- Use platform secrets (Railway env vars) in production
-- **Set a spend cap** in the [Anthropic Console](https://console.anthropic.com) — there's no built-in rate limiting
-- Consider per-user cooldowns if the bot is widely accessible
+Ship read-only, scope tight, don't store what you don't need. Audit `tools.ts` before every deploy. Treat every MCP server and database connection like a dependency — vet it before you trust it.
 
 ---
 
