@@ -13,7 +13,7 @@ test("getConfig reads required values and applies defaults", () => {
   assert.equal(config.slackBotToken, "xoxb-test");
   assert.equal(config.slackAppToken, "xapp-test");
   assert.equal(config.anthropicApiKey, "sk-ant-test");
-  assert.equal(config.anthropicModel, "claude-opus-4-20250514");
+  assert.equal(config.anthropicModel, "claude-opus-4-20250918");
   assert.equal(config.anthropicRequestTimeoutMs, 15000);
   assert.equal(config.anthropicMaxRetries, 2);
 });
