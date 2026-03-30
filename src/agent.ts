@@ -21,7 +21,7 @@ Use Slack formatting: *bold* for emphasis, bullet points (-) for lists.
 If you can't find what someone's looking for, say so and suggest a different search.
 When you reference data, be specific - include names, dates, and numbers.`;
 
-const DEFAULT_MODEL = "claude-opus-4-20250514";
+const DEFAULT_MODEL = "claude-opus-4-20250918";
 const DEFAULT_REQUEST_TIMEOUT_MS = 15_000;
 const DEFAULT_MAX_RETRIES = 2;
 const MAX_TOOL_CALLS = 10;

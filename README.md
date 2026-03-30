@@ -1,6 +1,6 @@
 # 🤖 Slack Bot + LLM Starter
 
-> Let people talk to your data through Slack.
+> Give your team an AI teammate that answers questions from your data — right inside Slack.
 
 ```
 User: "What's new this week?"
@@ -8,7 +8,7 @@ Bot:  "3 items this week — Q1 roadmap update, Acme's Series B,
        and the sales pipeline review..."
 ```
 
-Clone. Set keys. Run. That's it.
+Clone. Set 3 keys. Run. That's it.
 
 ---
 
@@ -18,7 +18,7 @@ Clone. Set keys. Run. That's it.
 graph LR
     A["💬 Slack"] -->|message| B["🧠 Agent"]
     B -->|tool call| C["🔧 Tools"]
-    C -->|data| D["📦 Your Data"]
+    C -->|query| D["📦 Your Data"]
     D -->|results| C
     C -->|response| B
     B -->|reply| A
@@ -29,63 +29,128 @@ graph LR
     style D fill:#059669,color:#fff,stroke:#059669
 ```
 
+Someone messages your bot in Slack. Claude reads the message, decides which tools to call, gets data back, and replies in the thread. You control what tools exist.
+
 **4 files, 1 extension point:**
 
-| File | Role |
-|------|------|
-| `src/slack.ts` | Messages in, replies out |
-| `src/agent.ts` | Claude thinks here (tool loop) |
+| File | What it does |
+|------|-------------|
+| `src/slack.ts` | Receives messages, posts replies |
+| `src/agent.ts` | Claude API + tool loop |
 | `src/tools.ts` | **Your tools — edit this first** |
-| `src/config.ts` | Env vars and defaults |
+| `src/config.ts` | Environment variables + defaults |
 
 ---
 
-## 🚀 Setup (10 minutes)
+## 🔒 Before You Start — What Gets Stored?
 
-### Prerequisites
+```mermaid
+graph LR
+    subgraph "Your Bot (stateless)"
+        A["Message in"] --> B["Claude processes"] --> C["Reply out"]
+    end
 
-- Node.js 20+
-- A Slack workspace you can install apps to
-- An Anthropic API key
+    subgraph "Where data lives"
+        D["Slack<br/>Messages stay in Slack"]
+        E["Anthropic API<br/>Subject to their<br/>retention policy"]
+    end
 
-### 1. Create a Slack App
+    B -.->|"API call"| E
+    A -.->|"stored by"| D
+    C -.->|"stored by"| D
+
+    style A fill:#059669,color:#fff,stroke:none
+    style B fill:#D97706,color:#fff,stroke:none
+    style C fill:#059669,color:#fff,stroke:none
+    style D fill:#4A154B,color:#fff,stroke:none
+    style E fill:#2563EB,color:#fff,stroke:none
+```
+
+**By default, this bot stores nothing.** No database, no logs, no conversation history. Messages live in Slack. API calls go to Anthropic (see their [data retention policy](https://www.anthropic.com/policies)). That's it.
+
+If you add a database later, you're now storing conversations — think about encryption, retention, and access controls before you do.
+
+---
+
+## 🚀 Setup
+
+You need **3 things**: a Slack app, an Anthropic key, and this repo.
+
+```mermaid
+graph LR
+    A["1️⃣ Create Slack App<br/>Get 2 tokens"] --> B["2️⃣ Get Anthropic Key<br/>~$5 credits"]
+    B --> C["3️⃣ Clone & Run<br/>Paste tokens in .env"]
+
+    style A fill:#4A154B,color:#fff,stroke:none
+    style B fill:#D97706,color:#fff,stroke:none
+    style C fill:#059669,color:#fff,stroke:none
+```
+
+### Step 1: Create a Slack App
 
 1. Go to [api.slack.com/apps](https://api.slack.com/apps) → **Create New App** → **From Scratch**
-2. **Socket Mode** → on → generate app token (`xapp-...`)
-3. **OAuth & Permissions** → add bot scopes:
-   - `app_mentions:read` · `chat:write` · `channels:history` · `im:history`
-4. **Install to Workspace** → copy bot token (`xoxb-...`)
-5. **Event Subscriptions** → on → subscribe to:
-   - `app_mention` · `message.im`
+2. Name it whatever you want, pick your workspace
+3. **Socket Mode** → toggle on → generate an app token (starts with `xapp-`)
+4. **OAuth & Permissions** → add bot scopes:
+   - `app_mentions:read` — see when someone @mentions the bot
+   - `chat:write` — post replies
+   - `channels:history` — read thread history for context
+   - `im:history` — read DMs *(skip this for channel-only mode)*
+5. **Install to Workspace** → copy the bot token (starts with `xoxb-`)
+6. **Event Subscriptions** → toggle on → subscribe to:
+   - `app_mention` — someone @mentions the bot
+   - `message.im` — someone DMs the bot *(skip for channel-only)*
 
-> **Scope changes?** Reinstall the app. Want private channels? Add `groups:history`.
+> **Changed scopes or events?** Reinstall the app to the workspace.
+> **Want private channels?** Add `groups:history`, reinstall, and invite the bot.
 
-### 2. Get an Anthropic Key
+### Step 2: Get an Anthropic Key
 
-[console.anthropic.com](https://console.anthropic.com) → create key → add ~$5 credits.
+1. Go to [console.anthropic.com](https://console.anthropic.com)
+2. Create an API key
+3. Add credits (~$5 is plenty to start)
+4. **Set a monthly spend cap** — there's no built-in rate limiting in the bot
 
-### 3. Clone & Run
+### Step 3: Clone & Run
 
 ```bash
 git clone https://github.com/Mikeishiring/slackbot.git && cd slackbot
 npm install
-cp .env.example .env   # then fill in your tokens
+cp .env.example .env   # then paste your 3 tokens
 npm start
 ```
 
-Invite the bot to a channel (`/invite @YourBot`), then `@YourBot what's new?`
+<details>
+<summary>Windows PowerShell</summary>
+
+```powershell
+Copy-Item .env.example .env
+npm install
+npm start
+```
+
+</details>
+
+### Step 4: Test It
+
+1. Invite the bot to a channel: `/invite @YourBotName`
+2. Send: `@YourBotName what's new this week?`
+3. Also try a DM — just message the bot directly
+
+Expected: the bot replies in a thread with information from the sample dataset.
+
+`npm run check` runs both linting and tests locally.
 
 <details>
 <summary>🤖 <strong>Agent / automated setup</strong> (Claude Code, Cursor, Codex)</summary>
 
 <br/>
 
-1. **Slack App** — use the **App Manifest** JSON editor, not individual pages. Set `socket_mode_enabled: true`, scopes + events in one shot.
+1. **Slack App** — use the **App Manifest** JSON editor (`Settings → App Manifests`), not individual pages. Set `socket_mode_enabled: true`, scopes + events in one shot.
 2. **Tokens** — app-level token with `connections:write`, bot token from OAuth. Both in `.env`.
-3. **Scopes** — add `reactions:write` for the 👀 emoji. Skip `im:history` for channel-only mode.
+3. **Scopes** — add `reactions:write` if you implement the 👀 processing indicator. Skip `im:history` for channel-only mode.
 4. **Railway** — set vars via Raw Editor or GraphQL (`variableCollectionUpsert`), not one-by-one.
 5. **Verify** — `npm run check` locally, then push. Railway auto-deploys.
-6. **Smoke test** — `@YourBot what's new?` → expect threaded reply with 👀 reaction.
 
 </details>
 
@@ -93,9 +158,24 @@ Invite the bot to a channel (`/invite @YourBot`), then `@YourBot what's new?`
 
 ## 🏗️ Architecture
 
+### Project Structure
+
+```
+📁 src/
+  ├── index.ts         → Entry point — wires everything together
+  ├── config.ts        → Env vars, defaults, validation
+  ├── slack.ts         → Socket Mode connection + thread history
+  ├── agent.ts         → Claude API + tool loop (max 10 calls)
+  └── tools.ts         → ⭐ YOUR TOOLS — start here
+📁 data/
+  └── sample-data.json → Starter dataset (swap this out)
+📁 test/               → Contract tests for all 4 modules
+📄 .env.example        → Template — copy to .env and fill in
+```
+
 ### The Tool Loop
 
-Every message goes through the same cycle:
+Here's exactly what happens when someone messages your bot:
 
 ```mermaid
 sequenceDiagram
@@ -104,43 +184,36 @@ sequenceDiagram
     participant T as tools.ts
 
     S->>A: "What happened with Acme?"
-    Note over S: 👀 reaction added
     A->>T: search_items({query: "Acme"})
-    T-->>A: [{title: "Acme Series B"...}]
+    T-->>A: [{title: "Acme Series B", id: "item-002"...}]
     A->>T: get_item({id: "item-002"})
     T-->>A: {content: "Acme raised $45M..."}
-    A-->>S: "Acme announced a $45M Series B..."
-    Note over S: 👀 reaction removed
+    A-->>S: "Acme announced a $45M Series B led by Sequoia..."
 ```
 
-Claude decides which tools to call and how many times. You define what tools exist.
+Claude decides which tools to call, how many times (up to 10), and how to summarize the results. You define what tools exist and what data they return.
 
-### Project Structure
+### What's Included
 
-```
-📁 src/
-  ├── index.ts         → Entry point — wires everything together
-  ├── config.ts        → Env parsing + defaults
-  ├── slack.ts         → Slack connection + thread management
-  ├── agent.ts         → Claude API + tool loop
-  └── tools.ts         → ⭐ YOUR TOOLS — start here
-📁 data/
-  └── sample-data.json → Starter dataset (swap this)
-📁 test/               → Contract tests
-📄 .env.example        → Template for secrets
-```
+The starter ships with 3 read-only tools against a sample JSON file:
+
+| Tool | What it does |
+|------|-------------|
+| `search_items` | Keyword search with optional tag filter |
+| `get_item` | Full details for one item by ID |
+| `list_recent` | Most recent items (default: last 7 days) |
 
 ---
 
 ## 🔧 Connect Your Data
 
-Open `src/tools.ts`. Three things to change:
+Open `src/tools.ts` — three things to change:
 
 ```mermaid
 graph TD
-    A["1️⃣ Tool Definitions"] --> B["What can Claude call?"]
-    C["2️⃣ Tool Implementations"] --> D["What runs when it calls?"]
-    E["3️⃣ Data Source"] --> F["Where does the data live?"]
+    A["1️⃣ Tool Definitions"] -->|"what can Claude call?"| B["Describe inputs + purpose"]
+    C["2️⃣ Tool Implementations"] -->|"what runs when called?"| D["Your query logic"]
+    E["3️⃣ Data Source"] -->|"where does data live?"| F["JSON → DB / API / MCP"]
 
     style A fill:#2563EB,color:#fff,stroke:none
     style C fill:#D97706,color:#fff,stroke:none
@@ -150,7 +223,7 @@ graph TD
     style F fill:#065f46,color:#fff,stroke:none
 ```
 
-**Database:**
+**Swap the JSON file for a database:**
 ```typescript
 import postgres from "postgres";
 const sql = postgres(process.env.DATABASE_URL);
@@ -160,15 +233,13 @@ function searchItems(query: string) {
 }
 ```
 
-**REST API:**
+**Or call a REST API:**
 ```typescript
 async function searchItems(query: string) {
   const res = await fetch(`https://api.example.com/search?q=${query}`);
   return res.json();
 }
 ```
-
-**MCP Server** — see [Scaling with MCP](#-scaling-with-mcp) below.
 
 ---
 
@@ -180,7 +251,7 @@ graph LR
         A["tools.ts<br/>3 tools, 1 file"]
     end
 
-    subgraph "Day 30"
+    subgraph "Growing"
         B["tools/<br/>index.ts"]
         C["search.ts"]
         D["reports.ts"]
@@ -190,7 +261,7 @@ graph LR
         B --> E
     end
 
-    subgraph "Day 90"
+    subgraph "Multi-source"
         F["tools/<br/>index.ts"]
         G["Local tools"]
         H["MCP servers"]
@@ -198,7 +269,7 @@ graph LR
         F --> H
     end
 
-    A -.->|"outgrow 1 file"| B
+    A -.->|"split into folder"| B
     B -.->|"add external sources"| F
 
     style A fill:#059669,color:#fff,stroke:none
@@ -211,7 +282,7 @@ graph LR
     style H fill:#92400e,color:#fff,stroke:none
 ```
 
-`agent.ts` never changes. It imports `tools` and `runTool` — doesn't matter if that comes from one file or ten.
+`agent.ts` never changes. It imports `tools` and `runTool` — doesn't matter if that's one file or ten.
 
 ---
 
@@ -238,50 +309,35 @@ graph LR
     style F fill:#059669,color:#fff,stroke:none
 ```
 
-**When to use MCP vs local tools:**
-
 | | Local (`tools.ts`) | MCP Server |
 |---|---|---|
-| **Best for** | Simple queries, single data source | Complex integrations, shared services |
+| **Best for** | Simple queries, single data source | Shared services, pre-built integrations |
 | **Setup** | Edit one file | Run a server + connect |
 | **Trust** | You wrote it | Audit what it exposes |
-| **Latency** | Direct | Network hop |
 
-**Start local.** Move to MCP when you have multiple bots sharing the same data source, or when a pre-built MCP server already does what you need.
-
----
-
-## 💰 Cost
-
-| Component | Monthly |
-|-----------|---------|
-| Slack | Free |
-| Anthropic API | ~$5–50 |
-| Railway | ~$5–20 |
-
-Main driver is tokens. Bigger data responses = more tokens per message.
+**Start local.** Move to MCP when you need multiple bots on the same data, or a pre-built server already does what you need.
 
 ---
 
-## 🔒 Security
+## 🛡️ Security
 
 Running an LLM in Slack creates new attack surface. Here's the threat model:
 
 ```mermaid
 graph TB
     subgraph "🟢 Safe by Default"
-        A["Stateless — no conversation storage"]
-        B["Read-only tools"]
+        A["Stateless — no data stored"]
+        B["Read-only tools only"]
         C["Socket Mode — no public URL"]
     end
 
     subgraph "🟡 Watch Carefully"
         D["Slack scope creep"]
-        E["Channel exposure"]
-        F["API cost abuse"]
+        E["Unscoped channel access"]
+        F["No rate limiting on API spend"]
     end
 
-    subgraph "🔴 High Risk"
+    subgraph "🔴 High Risk if Added"
         G["Database with write access"]
         H["Untrusted MCP servers"]
         I["Secrets in system prompt"]
@@ -298,70 +354,60 @@ graph TB
     style I fill:#DC2626,color:#fff,stroke:none
 ```
 
-### 1. Conversation Storage
+### Slack Scope Discipline
 
-By default the bot is **stateless** — no database, no logs. Deploy on Railway with just the LLM and **no conversation data is stored** beyond Slack itself and Anthropic's [data retention policy](https://www.anthropic.com/policies).
-
-Add a database? Now you're storing conversations. Think encryption, retention, access controls.
-
-### 2. Slack Scope Discipline
-
-Every scope is an attack surface. Ship with the minimum:
+Every OAuth scope is an attack surface. Ship with the minimum:
 
 | Scope | Risk | Guidance |
 |-------|------|----------|
-| `chat:write` | Low | Required |
-| `channels:history` | Medium | Only invited channels |
-| `files:write` | **High** | Add only if needed |
+| `chat:write` | Low | Required — bot replies |
+| `channels:history` | Medium | Only channels bot is invited to |
+| `files:write` | **High** | Add only if a tool needs it |
 | `admin.*` | **Critical** | Never give to a bot |
 
-### 3. Channel & Tool Scoping
+### Channel & Tool Scoping
 
-- **Channel allowlist** — check `event.channel` in `slack.ts`
-- **Read-only tools first** — write tools behind confirmation
-- **User allowlist** — restrict who can trigger the bot
+- **Channel allowlist** — check `event.channel` in `slack.ts` to restrict where the bot responds
+- **Read-only tools first** — write tools should require confirmation
+- **User allowlist** — restrict who can trigger the bot if needed
 
 > `search_items` is safe. `delete_items` or `run_sql` is a loaded gun.
 
-### 4. Third-Party & MCP Trust
+### Third-Party & MCP Trust
 
-- Only connect MCP servers **you control or trust**
+- Only connect MCP servers **you control or trust** — a malicious server can inject prompts via tool results
 - Audit tool lists before connecting (`client.listTools()`)
-- Run MCP in the same private network — not public internet
-- **Local tools first** — don't add MCP when `tools.ts` works fine
+- Run MCP in the same private network — not on the public internet
+- **Local tools first** — don't add an MCP dependency when `tools.ts` works fine
 
-### 5. Prompt Injection
+### Prompt Injection
 
-**An LLM is not a security boundary.** If you give the bot a database connection, assume a skilled user can extract any reachable data.
+**An LLM is not a security boundary.** If you give the bot a database connection, assume a skilled user can extract any data reachable by that connection. "Never return PII" in a system prompt is a guideline, not a guardrail — it can be bypassed.
 
-- Keep tools **read-only** — injection is harmless if worst case is a search
+- Keep tools **read-only** — limits damage even if injection succeeds
 - **Don't put secrets in the system prompt** — assume it can be extracted
-- **Validate tool inputs** in `runTool()` — don't trust Claude's parameters blindly
+- **Validate tool inputs** in `runTool()` — don't blindly trust Claude's parameters
 - **Scope database credentials** — read-only replica, row-level security
 - **Enforce access at the data layer**, never at the prompt layer
 
-### 6. Keys & Rate Limiting
+### Keys & Cost
 
 - Never commit `.env` (gitignored by default)
 - Use platform secrets (Railway env vars) in production
-- Set [spend caps](https://console.anthropic.com) — no built-in rate limiting
-- Consider per-user cooldowns if the bot is public
-
-**TL;DR:** Ship read-only, scope tight, don't store what you don't need, vet every MCP server like a dependency.
+- **Set a spend cap** in the [Anthropic Console](https://console.anthropic.com) — there's no built-in rate limiting
+- Consider per-user cooldowns if the bot is widely accessible
 
 ---
 
 ## 🚂 Deploy
 
 ```bash
-npm start   # local
+npm start   # local development
 ```
 
-**Railway:** Push to GitHub → New Project → Deploy from GitHub → add env vars → done.
+**Railway** (recommended): Push to GitHub → New Project → Deploy from GitHub → add env vars → done. Logs should show `Bot is running (Socket Mode)`.
 
-**Other hosts:** Fly.io, Render, DigitalOcean, Docker — anything that runs `npm start`.
-
-No public URL needed — Socket Mode connects outbound.
+**Other hosts:** Fly.io, Render, DigitalOcean, Docker — anything that runs `npm start` and stays alive. No public URL needed.
 
 ---
 
@@ -378,6 +424,31 @@ No public URL needed — Socket Mode connects outbound.
 
 ---
 
+## 💰 Cost
+
+| Component | Monthly cost |
+|-----------|-------------|
+| Slack | Free |
+| Anthropic API | ~$5–50 depending on usage |
+| Railway | ~$5–20 |
+
+**What drives cost:** Every message = one or more API calls. Longer tool responses and deeper threads use more tokens. A team of 10 with moderate usage runs ~$10–20/month.
+
+---
+
+## 🔧 Troubleshooting
+
+| Problem | Fix |
+|---------|-----|
+| Bot doesn't respond | Check scopes + event subscriptions. Reinstall app after changes. |
+| `Bot is running` but no replies | Invite the bot: `/invite @YourBotName` |
+| `not_found_error` on model | Check `ANTHROPIC_MODEL` — use a valid model ID |
+| Socket keeps disconnecting | Check `SLACK_APP_TOKEN` starts with `xapp-` |
+| High API costs | Set spend cap in Anthropic Console. Reduce tool response sizes. |
+| `Missing required environment variable` | Check `.env` has all 3 required vars filled in |
+
+---
+
 ## 📝 Notes
 
-This repo is intentionally small. The only file you need to touch is `src/tools.ts` — swap the sample JSON for your database, API, or MCP server and ship it.
+This repo is intentionally small. The only file you need to change is `src/tools.ts` — swap the sample JSON for your database, API, or MCP server and ship it.
