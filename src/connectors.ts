@@ -800,6 +800,15 @@ export class GoodStandingConnector implements StepConnector {
     }
 
     const registryUrl = context.snapshot.caseRecord.registrySearchUrl?.trim() ?? "";
+
+    // Try automated Delaware ICIS lookup before falling back to manual routing
+    if (isDelawareJurisdiction(caseRecord.incorporationCountry, caseRecord.incorporationState)) {
+      const delawareResult = await tryDelawareIcisLookup(context, caseRecord);
+      if (delawareResult) {
+        return delawareResult;
+      }
+    }
+
     const manualRouting = getManualRegistryRouting(context.snapshot);
     if (manualRouting) {
       return {
@@ -1200,15 +1209,20 @@ export class ReputationSearchConnector implements StepConnector {
       0
     );
     const degradedPages = pageSummaries.filter((page) => page.structureStatus !== "ok");
+    const hasReliableResults = extractedResultCount > 0 && degradedPages.length === 0 && captureFailures.length === 0;
+    const canAutoPass = hasReliableResults && likelyAdverseCount === 0;
 
     return {
-      status: "manual_review_required",
-      note:
-        degradedPages.length > 0
-          ? `Prepared search evidence, but ${degradedPages.length} Google page extraction(s) look degraded and need manual review.`
-          : captureFailures.length === 0
-            ? `Prepared search evidence and extracted ${extractedResultCount} result candidates for analyst review.`
-            : `Prepared search evidence with ${captureFailures.length} capture failure(s).`,
+      status: canAutoPass ? "passed" : "manual_review_required",
+      note: canAutoPass
+        ? `No adverse keywords found across ${extractedResultCount} search results from ${queries.length} queries. Auto-cleared.`
+        : degradedPages.length > 0
+          ? `Prepared search evidence, but ${degradedPages.length} page extraction(s) look degraded and need manual review.`
+          : likelyAdverseCount > 0
+            ? `Found ${likelyAdverseCount} result(s) with adverse keywords across ${extractedResultCount} candidates. Manual review required.`
+            : captureFailures.length > 0
+              ? `Prepared search evidence with ${captureFailures.length} capture failure(s).`
+              : `Prepared search evidence and extracted ${extractedResultCount} result candidates for analyst review.`,
       facts: [
         {
           stepKey: this.stepKey,
@@ -1260,17 +1274,19 @@ export class ReputationSearchConnector implements StepConnector {
                 },
               ]),
         ],
-      reviewTasks: [
-        {
-          stepKey: this.stepKey,
-          title: "Review reputational search results",
-          instructions: buildReputationReviewInstructions(
-            likelyAdverseCount,
-            extractedResultCount,
-            degradedPages.length
-          ),
-        },
-      ],
+      reviewTasks: canAutoPass
+        ? []
+        : [
+            {
+              stepKey: this.stepKey,
+              title: "Review reputational search results",
+              instructions: buildReputationReviewInstructions(
+                likelyAdverseCount,
+                extractedResultCount,
+                degradedPages.length
+              ),
+            },
+          ],
     };
   }
 }
@@ -1317,21 +1333,35 @@ export class BetterBusinessBureauConnector implements StepConnector {
     });
     const evidenceIds = [...capture.artifactIds, summaryArtifact.id];
 
+    const hasNegativeSignals =
+      summary.flaggedKeywords.length > 0 ||
+      (summary.complaintCount != null && summary.complaintCount > 0) ||
+      (summary.rating != null && /^[D-F]/i.test(summary.rating));
+    const isReliable = summary.structureStatus === "ok" && capture.error == null;
+    const canAutoPass = isReliable && !hasNegativeSignals;
+
     return {
-      status: "manual_review_required",
-      note:
-        summary.structureStatus !== "ok"
+      status: canAutoPass ? "passed" : "manual_review_required",
+      note: canAutoPass
+        ? `BBB check clean: ${summary.rating ? `rating ${summary.rating}` : "no rating found"}, no flagged keywords or complaints. Auto-cleared.`
+        : summary.structureStatus !== "ok"
           ? `BBB search evidence was prepared, but extraction looks ${summary.structureStatus} and needs manual checking.`
-          : capture.error == null
-            ? "BBB search capture prepared; analyst review is required."
-            : "BBB search capture failed and requires manual fallback.",
+          : hasNegativeSignals
+            ? `BBB check flagged concerns: ${[
+                summary.flaggedKeywords.length > 0 ? `${summary.flaggedKeywords.length} adverse keyword(s)` : null,
+                summary.complaintCount != null && summary.complaintCount > 0 ? `${summary.complaintCount} complaint(s)` : null,
+                summary.rating && /^[D-F]/i.test(summary.rating) ? `rating ${summary.rating}` : null,
+              ].filter(Boolean).join(", ")}. Manual review required.`
+            : capture.error != null
+              ? "BBB search capture failed and requires manual fallback."
+              : "BBB search capture prepared; analyst review is required.",
       facts: [
         {
           stepKey: this.stepKey,
           factKey: "bbb_search_summary",
           summary: buildBbbSummarySentence(summary),
           value: summary,
-          verificationStatus: "inferred",
+          verificationStatus: canAutoPass ? "verified" : "inferred",
           sourceId: "bbb_search",
           evidenceIds: [summaryArtifact.id],
           freshnessExpiresAt: addDays(new Date().toISOString(), 1),
@@ -1362,13 +1392,15 @@ export class BetterBusinessBureauConnector implements StepConnector {
                 },
               ]),
         ],
-      reviewTasks: [
-        {
-          stepKey: this.stepKey,
-          title: "Review BBB results",
-          instructions: buildBbbReviewInstructions(summary),
-        },
-      ],
+      reviewTasks: canAutoPass
+        ? []
+        : [
+            {
+              stepKey: this.stepKey,
+              title: "Review BBB results",
+              instructions: buildBbbReviewInstructions(summary),
+            },
+          ],
     };
   }
 }
@@ -4398,6 +4430,182 @@ async function runOfacSearch(
 
 function defaultUserAgent(): string {
   return "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36";
+}
+
+async function tryDelawareIcisLookup(
+  context: ConnectorContext,
+  caseRecord: CaseSnapshot["caseRecord"]
+): Promise<StepExecutionResult | null> {
+  if (!context.captureService) {
+    return null;
+  }
+
+  const hint = getKnownEntitySourceHint(caseRecord);
+  const delawareSuggestion = hint?.registrySuggestions?.find(
+    (suggestion) =>
+      suggestion.url.includes("icis.corp.delaware.gov") && suggestion.fileNumber
+  );
+
+  const entityName = delawareSuggestion?.exactEntityName ?? caseRecord.legalName ?? caseRecord.displayName;
+  const fileNumber = delawareSuggestion?.fileNumber ?? null;
+
+  try {
+    const browser = await chromium.launch({
+      headless: true,
+      args: ["--disable-http2", "--disable-blink-features=AutomationControlled", "--no-sandbox"],
+    });
+
+    try {
+      const browserContext = await browser.newContext({
+        userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      });
+      const page = await browserContext.newPage();
+
+      await page.goto("https://icis.corp.delaware.gov/Ecorp/EntitySearch/NameSearch.aspx", {
+        waitUntil: "domcontentloaded",
+        timeout: 20_000,
+      });
+
+      // Try file number search first (most precise)
+      if (fileNumber) {
+        const fileNumberTab = page.locator('a[href*="FileNumSearch"]').first();
+        if (await fileNumberTab.isVisible({ timeout: 3_000 }).catch(() => false)) {
+          await fileNumberTab.click();
+          await page.waitForTimeout(1_000);
+          const fileInput = page.locator('input[name*="FileNumber"], input[id*="FileNumber"]').first();
+          if (await fileInput.isVisible({ timeout: 3_000 }).catch(() => false)) {
+            await fileInput.fill(fileNumber);
+            await page.locator('input[type="submit"], button[type="submit"]').first().click();
+            await page.waitForLoadState("domcontentloaded", { timeout: 15_000 });
+          }
+        }
+      } else {
+        // Name search
+        const nameInput = page.locator('input[name*="EntityName"], input[id*="EntityName"]').first();
+        if (await nameInput.isVisible({ timeout: 5_000 }).catch(() => false)) {
+          await nameInput.fill(entityName);
+          await page.locator('input[type="submit"], button[type="submit"]').first().click();
+          await page.waitForLoadState("domcontentloaded", { timeout: 15_000 });
+        }
+      }
+
+      // Look for entity link in results and click through
+      const entityLink = page.locator('a[href*="EntitySearch/EntityDetails"]').first();
+      if (await entityLink.isVisible({ timeout: 5_000 }).catch(() => false)) {
+        await entityLink.click();
+        await page.waitForLoadState("domcontentloaded", { timeout: 15_000 });
+      }
+
+      const pageContent = await page.content();
+      const pageText = await page.innerText("body").catch(() => "");
+      const finalUrl = page.url();
+
+      // Take screenshot
+      const screenshot = await page.screenshot({ fullPage: true }).catch(() => null);
+
+      await browserContext.close();
+
+      // Save artifacts
+      const htmlArtifact = await context.artifactStore.saveArtifact({
+        caseId: caseRecord.id,
+        stepKey: "good_standing",
+        title: "Delaware ICIS Registry Result",
+        sourceId: "official_registry",
+        sourceUrl: finalUrl,
+        fileName: "delaware-icis-result.html",
+        contentType: "text/html",
+        body: pageContent,
+        category: "evidence",
+        metadata: { sourceUrl: finalUrl, searchMode: "automated_icis", entityName, fileNumber },
+      });
+
+      const evidenceIds = [htmlArtifact.id];
+
+      if (screenshot) {
+        const screenshotArtifact = await context.artifactStore.saveArtifact({
+          caseId: caseRecord.id,
+          stepKey: "good_standing",
+          title: "Delaware ICIS Screenshot",
+          sourceId: "official_registry",
+          sourceUrl: finalUrl,
+          fileName: "delaware-icis-screenshot.png",
+          contentType: "image/png",
+          body: screenshot,
+          category: "evidence",
+          metadata: { sourceUrl: finalUrl, captureType: "screenshot" },
+        });
+        evidenceIds.push(screenshotArtifact.id);
+      }
+
+      // Only trust status indicators if we landed on an entity detail page, not search results
+      const isDetailPage =
+        finalUrl.includes("EntityDetails") ||
+        finalUrl.includes("entitydetails");
+      const isSearchResultsPage =
+        pageText.includes("search results will return both active and inactive") ||
+        pageText.includes("Entity Name to search") ||
+        finalUrl.includes("NameSearch") ||
+        finalUrl.includes("FileNumSearch");
+
+      if (!isDetailPage || isSearchResultsPage) {
+        return null;
+      }
+
+      const statusEvidence = findGoodStandingIndicator(pageText);
+
+      if (statusEvidence.negativeMatch) {
+        return {
+          status: "failed",
+          note: `Delaware ICIS showed negative status: ${statusEvidence.negativeMatch}.`,
+          facts: [{
+            stepKey: "good_standing",
+            factKey: "good_standing_status",
+            summary: `Delaware ICIS automated lookup found negative status: ${statusEvidence.negativeMatch}.`,
+            value: { registrySearchUrl: finalUrl, negativeMatch: statusEvidence.negativeMatch, searchMode: "automated_icis" },
+            verificationStatus: "verified",
+            sourceId: "official_registry",
+            evidenceIds,
+            freshnessExpiresAt: addDays(new Date().toISOString(), 90),
+          }],
+          issues: [{
+            stepKey: "good_standing",
+            severity: "high",
+            title: "Entity not in good standing",
+            detail: `Delaware ICIS: ${statusEvidence.negativeMatch}`,
+            evidenceIds,
+          }],
+          reviewTasks: [],
+        };
+      }
+
+      if (statusEvidence.positiveMatch) {
+        return {
+          status: "passed",
+          note: `Delaware ICIS confirmed active status: ${statusEvidence.positiveMatch}. Auto-verified.`,
+          facts: [{
+            stepKey: "good_standing",
+            factKey: "good_standing_status",
+            summary: `Delaware ICIS automated lookup confirmed: ${statusEvidence.positiveMatch}.`,
+            value: { registrySearchUrl: finalUrl, positiveMatch: statusEvidence.positiveMatch, searchMode: "automated_icis" },
+            verificationStatus: "verified",
+            sourceId: "official_registry",
+            evidenceIds,
+            freshnessExpiresAt: addDays(new Date().toISOString(), 90),
+          }],
+          issues: [],
+          reviewTasks: [],
+        };
+      }
+
+      // Got a page but couldn't determine status — still an improvement, save evidence
+      return null;
+    } finally {
+      await browser.close();
+    }
+  } catch (error) {
+    console.error("Delaware ICIS automated lookup failed", error);
+    return null;
+  }
 }
 
 async function tryWebApiSearch(
