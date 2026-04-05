@@ -2413,9 +2413,14 @@ function buildEntityEvidenceCandidates(
       "/",
       "/terms",
       "/terms-of-service",
+      "/tos",
       "/legal",
+      "/legal/terms",
+      "/legal/terms-of-service",
       "/privacy",
       "/privacy-policy",
+      "/about",
+      "/imprint",
     ];
     for (const value of uniqueStrings(
       [caseRecord.website, ...paths.map((path) => new URL(path, `${baseUrl.origin}/`).toString())]
