@@ -776,16 +776,33 @@ function collectStepEvidenceIds(
   ]);
 }
 
+const ENTITY_RESOLUTION_INDEPENDENT_STEPS: Set<WorkflowStepKey> = new Set([
+  "reputation_search",
+  "bbb_review",
+  "ofac_precheck",
+  "ofac_search",
+]);
+
 function shouldShortCircuit(
   snapshot: CaseSnapshot,
   stepKey: WorkflowStepKey
 ): boolean {
-  return (
-    (snapshot.caseRecord.recommendation === "terminate" &&
-      stepKey !== "good_standing") ||
-    (snapshot.caseRecord.recommendation === "blocked" &&
-      stepKey !== "entity_resolution")
-  );
+  if (snapshot.caseRecord.recommendation === "terminate") {
+    return stepKey !== "good_standing";
+  }
+
+  if (snapshot.caseRecord.recommendation === "blocked") {
+    // If blocked on entity_resolution, still run steps that don't depend on it
+    const blockedOnEntityResolution = snapshot.steps.some(
+      (step) => step.stepKey === "entity_resolution" && step.status === "blocked"
+    );
+    if (blockedOnEntityResolution && ENTITY_RESOLUTION_INDEPENDENT_STEPS.has(stepKey)) {
+      return false;
+    }
+    return stepKey !== "entity_resolution";
+  }
+
+  return false;
 }
 
 function isTransientWorkerError(message: string): boolean {

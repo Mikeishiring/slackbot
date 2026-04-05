@@ -42,8 +42,9 @@ Hard gates terminate the case on failure.
 INTAKE:
 When someone wants to screen a counterparty, you need:
 - Name (required)
-- Entity or individual (required -- ask if unclear)
-Create the case as soon as you have these two. Jurisdiction, website, and registry URL improve results but don't block creation -- ask conversationally and use update_case if provided later.
+- Entity or individual (required -- assume entity if it sounds like a company)
+- Website (strongly recommended -- helps discover legal name, jurisdiction, and industry context)
+Create the case as soon as you have the name and type. The bot will try to discover legal name and jurisdiction from the website automatically. If entity resolution gets blocked, the other checks (reputation, BBB, OFAC) still run in parallel.
 
 Before creating, use search_cases to check for duplicates. If similar active cases exist, tell the user and ask if they want to proceed.
 
