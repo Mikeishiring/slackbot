@@ -2,7 +2,7 @@ import { join } from "node:path";
 
 import { LocalCaseExporter, formatHealthSnapshot, formatRetentionPruneResult } from "./admin.js";
 import { LocalArtifactStore, LocalReportPublisher, PlaywrightCaptureService } from "./artifacts.js";
-import { GoogleCustomSearchClient, RemoteOfacDatasetClient, createDefaultConnectors, type OfacDatasetClient } from "./connectors.js";
+import { BraveSearchClient, GoogleCustomSearchClient, RemoteOfacDatasetClient, createDefaultConnectors, type OfacDatasetClient } from "./connectors.js";
 import type { AppConfig } from "./config.js";
 import { loadPolicyBundle } from "./policy.js";
 import { PolicyBotStorage } from "./storage.js";
@@ -100,12 +100,14 @@ export class PolicyBotRuntime {
         jobRetryDelayMs: this.config.jobRetryDelayMs,
         jobLockTimeoutMs: this.config.jobLockTimeoutMs,
       },
-      this.config.googleSearchApiKey && this.config.googleSearchEngineId
-        ? new GoogleCustomSearchClient(
-            this.config.googleSearchApiKey,
-            this.config.googleSearchEngineId
-          )
-        : null
+      this.config.braveSearchApiKey
+        ? new BraveSearchClient(this.config.braveSearchApiKey)
+        : this.config.googleSearchApiKey && this.config.googleSearchEngineId
+          ? new GoogleCustomSearchClient(
+              this.config.googleSearchApiKey,
+              this.config.googleSearchEngineId
+            )
+          : null
     );
     this.exporter = new LocalCaseExporter(this.artifactStore, this.config.exportRoot);
   }

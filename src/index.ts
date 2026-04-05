@@ -151,6 +151,14 @@ function runPreflightChecks(config: ReturnType<typeof getConfig>): void {
         "Replace them with real tokens from api.slack.com/apps."
     );
   }
+
+  if (!config.braveSearchApiKey && !config.googleSearchApiKey) {
+    console.warn(
+      "WARNING: No search API configured. Reputation search will fall back to headless browser, " +
+        "which Google blocks. Set BRAVE_SEARCH_API_KEY for reliable results. " +
+        "Get a free key at https://brave.com/search/api/"
+    );
+  }
 }
 
 function checkPlaywrightInstalled(): boolean {

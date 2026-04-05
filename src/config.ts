@@ -41,6 +41,7 @@ export interface AppConfig {
   jobRetryDelayMs: number;
   jobLockTimeoutMs: number;
   ofacDatasetUrls: string[] | null;
+  braveSearchApiKey: string | null;
   googleSearchApiKey: string | null;
   googleSearchEngineId: string | null;
 }
@@ -138,6 +139,7 @@ export function getConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       DEFAULT_JOB_LOCK_TIMEOUT_MS
     ),
     ofacDatasetUrls: readOptionalCsvEnv(env, "POLICY_BOT_OFAC_DATASET_URLS"),
+    braveSearchApiKey: readOptionalEnv(env, "BRAVE_SEARCH_API_KEY") ?? null,
     googleSearchApiKey: readOptionalEnv(env, "GOOGLE_SEARCH_API_KEY") ?? null,
     googleSearchEngineId: readOptionalEnv(env, "GOOGLE_SEARCH_ENGINE_ID") ?? null,
   };

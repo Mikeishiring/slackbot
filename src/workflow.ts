@@ -1,5 +1,5 @@
 import type { ArtifactStore, CaptureService, ReportPublisher } from "./artifacts.js";
-import type { ConnectorContext, GoogleSearchClient, StepConnector } from "./connectors.js";
+import type { ConnectorContext, WebSearchClient, StepConnector } from "./connectors.js";
 import { getApplicableSteps, isTopExchange } from "./policy.js";
 import { PolicyBotStorage } from "./storage.js";
 import type {
@@ -49,7 +49,7 @@ export class PolicyWorkflow {
     private readonly captureService: CaptureService | null,
     private readonly reportPublisher: ReportPublisher,
     private readonly options: WorkflowRuntimeOptions,
-    private readonly googleSearchClient: GoogleSearchClient | null = null
+    private readonly webSearchClient: WebSearchClient | null = null
   ) {}
 
   public setOnStepComplete(callback: OnStepComplete): void {
@@ -412,7 +412,7 @@ export class PolicyWorkflow {
       storage: this.storage,
       artifactStore: this.artifactStore,
       captureService: this.captureService,
-      googleSearchClient: this.googleSearchClient,
+      webSearchClient: this.webSearchClient,
     };
   }
 

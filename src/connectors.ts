@@ -37,7 +37,7 @@ export interface ConnectorContext {
   storage: PolicyBotStorage;
   artifactStore: ArtifactStore;
   captureService: CaptureService | null;
-  googleSearchClient: GoogleSearchClient | null;
+  webSearchClient: WebSearchClient | null;
 }
 
 export interface StepConnector {
@@ -69,23 +69,57 @@ export interface OfacDatasetClient {
   loadCurrentDataset(): Promise<OfacDatasetSnapshot>;
 }
 
-export interface GoogleSearchResult {
+export interface WebSearchResult {
   title: string;
   link: string;
   snippet: string;
 }
 
-export interface GoogleSearchClient {
-  search(query: string, start: number): Promise<GoogleSearchResult[]>;
+export interface WebSearchClient {
+  search(query: string, start: number): Promise<WebSearchResult[]>;
 }
 
-export class GoogleCustomSearchClient implements GoogleSearchClient {
+export class BraveSearchClient implements WebSearchClient {
+  public constructor(private readonly apiKey: string) {}
+
+  public async search(query: string, start: number): Promise<WebSearchResult[]> {
+    const params = new URLSearchParams({
+      q: query,
+      offset: String(start),
+      count: "10",
+    });
+    const url = `https://api.search.brave.com/res/v1/web/search?${params}`;
+    const response = await fetch(url, {
+      headers: {
+        "Accept": "application/json",
+        "Accept-Encoding": "gzip",
+        "X-Subscription-Token": this.apiKey,
+      },
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!response.ok) {
+      throw new Error(`Brave Search API returned HTTP ${response.status}`);
+    }
+
+    const body = (await response.json()) as {
+      web?: { results?: Array<{ title?: string; url?: string; description?: string }> };
+    };
+
+    return (body.web?.results ?? []).map((item) => ({
+      title: item.title ?? "",
+      link: item.url ?? "",
+      snippet: item.description ?? "",
+    }));
+  }
+}
+
+export class GoogleCustomSearchClient implements WebSearchClient {
   public constructor(
     private readonly apiKey: string,
     private readonly searchEngineId: string
   ) {}
 
-  public async search(query: string, start: number): Promise<GoogleSearchResult[]> {
+  public async search(query: string, start: number): Promise<WebSearchResult[]> {
     const params = new URLSearchParams({
       key: this.apiKey,
       cx: this.searchEngineId,
@@ -1068,7 +1102,7 @@ export class ReputationSearchConnector implements StepConnector {
     let searchIndex = 0;
     for (const query of queries) {
       for (const offset of [0, 10]) {
-        if (searchIndex > 0 && !context.googleSearchClient) {
+        if (searchIndex > 0 && !context.webSearchClient) {
           await delay(2_000 + Math.floor(Math.random() * 2_000));
         }
         searchIndex += 1;
@@ -1079,17 +1113,20 @@ export class ReputationSearchConnector implements StepConnector {
           offset: String(offset),
         });
 
-        // Try Google Custom Search API first (reliable, no bot detection)
-        if (context.googleSearchClient) {
-          const apiResults = await tryGoogleApiSearch(
+        // Try web search API first (reliable, no bot detection)
+        if (context.webSearchClient) {
+          if (offset > 0) {
+            continue;
+          }
+          const apiResults = await tryWebApiSearch(
             context,
             query,
-            offset,
+            0,
             url,
             name,
             evidenceIds,
             pageSummaries,
-            pageNumber
+            1
           );
           if (apiResults) {
             continue;
@@ -4363,7 +4400,7 @@ function defaultUserAgent(): string {
   return "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36";
 }
 
-async function tryGoogleApiSearch(
+async function tryWebApiSearch(
   context: ConnectorContext,
   query: string,
   offset: number,
@@ -4373,12 +4410,12 @@ async function tryGoogleApiSearch(
   pageSummaries: ReputationSearchPageSummary[],
   pageNumber: number
 ): Promise<boolean> {
-  if (!context.googleSearchClient) {
+  if (!context.webSearchClient) {
     return false;
   }
 
   try {
-    const apiResults = await context.googleSearchClient.search(query, offset);
+    const apiResults = await context.webSearchClient.search(query, offset);
     const ignoredKeywords = deriveIgnoredAdverseKeywords(query, counterpartyName);
     const hits: SearchHitSummary[] = apiResults.map((result) => {
       let domain: string | null = null;
@@ -4400,14 +4437,14 @@ async function tryGoogleApiSearch(
     const summaryArtifact = await context.artifactStore.saveArtifact({
       caseId: context.snapshot.caseRecord.id,
       stepKey: "reputation_search",
-      title: `Google API Search: ${query} page ${pageNumber}`,
+      title: `Web Search: ${query} page ${pageNumber}`,
       sourceId: "google_search",
       sourceUrl: url,
-      fileName: `google-api-${slugify(query)}-page${pageNumber}.json`,
+      fileName: `web-search-${slugify(query)}-page${pageNumber}.json`,
       contentType: "application/json",
       body: JSON.stringify({ query, pageNumber, offset, results: apiResults }, null, 2),
       category: "evidence",
-      metadata: { searchMode: "google_api", query, pageNumber },
+      metadata: { searchMode: "web_api", query, pageNumber },
     });
 
     evidenceIds.push(summaryArtifact.id);
