@@ -616,11 +616,17 @@ export class EntityResolutionConnector implements StepConnector {
       }
     }
 
-    const websiteInference = await inferEntityDetailsFromWebsite(
-      context,
-      resolvedCaseRecord,
-      this.entityEvidenceLoader
-    );
+    // Only run website/web-search inference if curated hints didn't already provide what we need
+    const needsLegalName = !resolvedCaseRecord.legalName;
+    const needsJurisdiction = !resolvedCaseRecord.incorporationCountry;
+
+    const websiteInference = (needsLegalName || needsJurisdiction)
+      ? await inferEntityDetailsFromWebsite(
+          context,
+          resolvedCaseRecord,
+          this.entityEvidenceLoader
+        )
+      : { casePatch: {}, facts: [] as NewFactInput[], issues: [] as NewIssueInput[] };
     if (Object.keys(websiteInference.casePatch).length > 0) {
       context.storage.updateCaseScreeningFields(
         resolvedCaseRecord.id,
