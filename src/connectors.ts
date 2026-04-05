@@ -1077,8 +1077,10 @@ export class ReputationSearchConnector implements StepConnector {
     }
 
     const name = context.snapshot.caseRecord.displayName;
+    const industryQualifier = deriveIndustryQualifier(context.snapshot.caseRecord);
+    const qualifiedName = industryQualifier ? `${name} ${industryQualifier}` : name;
     const queries = [
-      name,
+      qualifiedName,
       `${name} scam`,
       `${name} fraud`,
       `${name} sued`,
@@ -4430,6 +4432,48 @@ async function runOfacSearch(
 
 function defaultUserAgent(): string {
   return "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36";
+}
+
+function deriveIndustryQualifier(
+  caseRecord: CaseSnapshot["caseRecord"]
+): string | null {
+  const signals = [
+    caseRecord.website,
+    caseRecord.notes,
+    caseRecord.displayName,
+  ]
+    .filter((value): value is string => typeof value === "string")
+    .join(" ")
+    .toLowerCase();
+
+  const cryptoSignals = [
+    "crypto", "blockchain", "defi", "web3", "token", "dao",
+    "chain", "swap", "wallet", "nft", "protocol", "ethereum",
+    "bitcoin", "solana", "layer", "bridge", "staking", "yield",
+    "exchange", "dex", "lending", "onchain", "offchain",
+  ];
+
+  if (cryptoSignals.some((signal) => signals.includes(signal))) {
+    return "crypto";
+  }
+
+  const financeSignals = [
+    "fintech", "payments", "banking", "compliance", "aml",
+    "kyc", "sanctions", "trading", "finance", "capital",
+  ];
+
+  if (financeSignals.some((signal) => signals.includes(signal))) {
+    return "fintech";
+  }
+
+  // For short/generic names (1-2 words, common English words), add "company" to disambiguate
+  const words = caseRecord.displayName.trim().split(/\s+/);
+  const genericWords = ["rain", "mesh", "monad", "inch", "block", "flow", "edge", "core", "base"];
+  if (words.length <= 2 && words.some((word) => genericWords.includes(word.toLowerCase()))) {
+    return "crypto";
+  }
+
+  return null;
 }
 
 async function tryDelawareIcisLookup(

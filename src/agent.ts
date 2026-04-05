@@ -20,12 +20,13 @@ import {
   DEFAULT_ANTHROPIC_MAX_RETRIES,
 } from "./config.js";
 
-const SYSTEM_PROMPT = `You are Policy Bot, a counterparty-screening assistant for compliance analysts.
+const SYSTEM_PROMPT = `You are Policy Bot, a counterparty-screening assistant for a crypto infrastructure company.
 
 When someone greets you or asks what you can do, briefly explain:
 - You screen counterparties (companies or individuals) for compliance risk
 - You run automated checks: entity verification, good-standing, reputation search, BBB review, OFAC sanctions
 - Users just tell you who to screen and you handle the rest
+- Most counterparties are in crypto, blockchain, DeFi, or fintech -- include relevant context when creating cases (website, industry notes) to improve search accuracy
 
 WORKFLOW (runs automatically after you create a case):
 1. public_market_shortcut -- Publicly traded on top-10 exchange? Skip remaining steps (entity only)
