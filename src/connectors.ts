@@ -1181,7 +1181,7 @@ export class ReputationSearchConnector implements StepConnector {
           url,
           extractedResultCount: extraction.results.length,
           likelyAdverseCount: extraction.results.filter(
-            (result) => result.adverseKeywords.length > 0
+            (result) => result.adverseKeywords.length > 0 && !isLikelyAdverseNoise(result.title, result.snippet ?? "")
           ).length,
           extractionSource: extraction.extractionSource,
           fetchError: extraction.fetchError,
@@ -1353,9 +1353,11 @@ export class BetterBusinessBureauConnector implements StepConnector {
     const evidenceIds = [...capture.artifactIds, summaryArtifact.id];
 
     const hasNegativeSignals =
-      summary.flaggedKeywords.length > 0 ||
-      (summary.complaintCount != null && summary.complaintCount > 0) ||
-      (summary.rating != null && /^[D-F]/i.test(summary.rating));
+      (summary.complaintCount != null && summary.complaintCount > 3) ||
+      (summary.rating != null && /^[D-F]/i.test(summary.rating)) ||
+      summary.flaggedKeywords.some((keyword) =>
+        keyword !== "complaint" && keyword !== "complaints"
+      );
     const isReliable = summary.structureStatus === "ok" && capture.error == null;
     const canAutoPass = isReliable && !hasNegativeSignals;
 
@@ -3935,6 +3937,17 @@ function deriveIgnoredAdverseKeywords(query: string, displayName: string): strin
   return queryKeywords.filter((keyword) => !displayKeywords.has(keyword));
 }
 
+const NOISE_PATTERNS = [
+  /is\s+\S+\s+a\s+scam/i,
+  /scam\s+or\s+legit/i,
+  /legit\s+or\s+scam/i,
+  /\breview\b.*\bscam\b/i,
+  /\bscam\b.*\breview\b/i,
+  /\breddit\b/i,
+  /\bquora\b/i,
+  /is\s+it\s+(?:safe|legit|real)/i,
+];
+
 function extractAdverseKeywords(text: string, ignoredKeywords: string[] = []): string[] {
   const lowered = normalizeName(text);
   const ignored = new Set(ignoredKeywords.map((keyword) => normalizeName(keyword)));
@@ -3944,6 +3957,11 @@ function extractAdverseKeywords(text: string, ignoredKeywords: string[] = []): s
         lowered.includes(keyword) && !ignored.has(normalizeName(keyword))
     )
   );
+}
+
+function isLikelyAdverseNoise(title: string, snippet: string): boolean {
+  const combined = `${title} ${snippet}`;
+  return NOISE_PATTERNS.some((pattern) => pattern.test(combined));
 }
 
 function extractBbbSummary(html: string): BbbSearchSummary {
@@ -5050,7 +5068,9 @@ async function tryWebApiSearch(
       pageNumber,
       url,
       extractedResultCount: hits.length,
-      likelyAdverseCount: hits.filter((hit) => hit.adverseKeywords.length > 0).length,
+      likelyAdverseCount: hits.filter(
+        (hit) => hit.adverseKeywords.length > 0 && !isLikelyAdverseNoise(hit.title, hit.snippet ?? "")
+      ).length,
       extractionSource: "captured_html",
       fetchError: null,
       captureError: null,

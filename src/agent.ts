@@ -44,7 +44,10 @@ When someone wants to screen a counterparty, you need:
 - Name (required)
 - Entity or individual (required -- assume entity if it sounds like a company)
 - Website (strongly recommended -- helps discover legal name, jurisdiction, and industry context)
+If the user doesn't provide a website, ask for it -- it significantly improves entity resolution.
 Create the case as soon as you have the name and type. The bot will try to discover legal name and jurisdiction from the website automatically. If entity resolution gets blocked, the other checks (reputation, BBB, OFAC) still run in parallel.
+
+When entity resolution blocks (can't find jurisdiction), check the case with get_case and tell the user what's missing. Ask: "I found the legal name [X] but couldn't determine the incorporation state. Do you know where they're incorporated?" Then use update_case to add it. Most crypto companies are incorporated in Delaware, Cayman Islands, BVI, Wyoming, or Singapore.
 
 Before creating, use search_cases to check for duplicates. If similar active cases exist, tell the user and ask if they want to proceed.
 
