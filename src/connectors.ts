@@ -2926,34 +2926,45 @@ function findGoodStandingIndicator(html: string): {
   negativeMatch: string | null;
 } {
   const text = stripHtmlToText(html).toLowerCase().replace(/\s+/g, " ");
-  const negativePatterns = [
-    /\bnot in good standing\b/,
-    /\bnot found\b/,
-    /\binactive\b/,
-    /\bdissolved\b/,
-    /\brevoked\b/,
-    /\bterminated\b/,
-    /\bcancelled\b/,
-    /\bforfeited\b/,
-  ];
-  for (const pattern of negativePatterns) {
-    const match = pattern.exec(text);
-    if (match?.[0]) {
-      return { positiveMatch: null, negativeMatch: match[0] };
-    }
-  }
 
+  // Ignore generic explanatory text about "active and inactive"
+  const isGenericContext =
+    text.includes("active and inactive") ||
+    text.includes("both active and inactive") ||
+    text.includes("search results will return");
+
+  // Check positive first — if we find "status: active", that's definitive
   const positivePatterns = [
     /\bcompany status\s*:?\s*active\b/,
     /\bentity status\s*:?\s*active\b/,
     /\bstatus\s*:?\s*active\b/,
     /\bin good standing\b/,
     /\bgood standing\b/,
+    /\bstatus\b[^.]{0,30}\bactive\b/,
   ];
   for (const pattern of positivePatterns) {
     const match = pattern.exec(text);
     if (match?.[0]) {
       return { positiveMatch: match[0], negativeMatch: null };
+    }
+  }
+
+  // Only check negative if not in generic context
+  if (!isGenericContext) {
+    const negativePatterns = [
+      /\bnot in good standing\b/,
+      /\bstatus\s*:?\s*inactive\b/,
+      /\bstatus\s*:?\s*dissolved\b/,
+      /\bstatus\s*:?\s*revoked\b/,
+      /\bstatus\s*:?\s*void\b/,
+      /\bstatus\s*:?\s*cancelled\b/,
+      /\bstatus\s*:?\s*forfeited\b/,
+    ];
+    for (const pattern of negativePatterns) {
+      const match = pattern.exec(text);
+      if (match?.[0]) {
+        return { positiveMatch: null, negativeMatch: match[0] };
+      }
     }
   }
 
