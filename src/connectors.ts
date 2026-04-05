@@ -616,7 +616,30 @@ export class EntityResolutionConnector implements StepConnector {
       }
     }
 
-    // Only run website/web-search inference if curated hints didn't already provide what we need
+    // Apply known entity hint curated patches first (most reliable source)
+    const knownHint = getKnownEntitySourceHint(resolvedCaseRecord);
+    if (knownHint) {
+      for (const candidate of knownHint.evidenceCandidates) {
+        if (candidate.curatedPatch && Object.keys(candidate.curatedPatch).length > 0) {
+          const hintPatch: UpdateCaseScreeningInput = {};
+          if (candidate.curatedPatch.legalName && !resolvedCaseRecord.legalName) {
+            hintPatch.legalName = candidate.curatedPatch.legalName;
+          }
+          if (candidate.curatedPatch.incorporationCountry && !resolvedCaseRecord.incorporationCountry) {
+            hintPatch.incorporationCountry = candidate.curatedPatch.incorporationCountry;
+          }
+          if (candidate.curatedPatch.incorporationState && !resolvedCaseRecord.incorporationState) {
+            hintPatch.incorporationState = candidate.curatedPatch.incorporationState;
+          }
+          if (Object.keys(hintPatch).length > 0) {
+            context.storage.updateCaseScreeningFields(resolvedCaseRecord.id, hintPatch);
+            resolvedCaseRecord = applyCasePatch(resolvedCaseRecord, hintPatch);
+          }
+        }
+      }
+    }
+
+    // Run website inference only for fields not yet resolved by hints
     const needsLegalName = !resolvedCaseRecord.legalName;
     const needsJurisdiction = !resolvedCaseRecord.incorporationCountry;
 
