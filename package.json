@@ -6,6 +6,10 @@
   "scripts": {
     "start": "tsx src/index.ts",
     "dev": "tsx watch src/index.ts",
+    "health": "tsx src/index.ts health",
+    "run-jobs": "tsx src/index.ts run-jobs",
+    "run-batch": "tsx src/index.ts run-batch",
+    "setup": "npx playwright install chromium",
     "test": "node --import tsx --test",
     "typecheck": "tsc --noEmit",
     "check": "npm run typecheck && npm test"
@@ -13,11 +17,17 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
     "@slack/bolt": "^4.1.0",
-    "dotenv": "^17.2.3"
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/pdfkit": "^0.17.5",
+    "better-sqlite3": "^12.8.0",
+    "dotenv": "^17.2.3",
+    "pdfkit": "^0.18.0",
+    "playwright": "^1.59.1",
+    "tsx": "^4.19.0",
+    "yaml": "^2.8.3"
   },
   "devDependencies": {
     "@types/node": "^24.9.1",
-    "tsx": "^4.19.0",
     "typescript": "^5.7.0"
   }
 }

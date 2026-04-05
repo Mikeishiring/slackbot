@@ -1,0 +1,44 @@
+version: "2026-04-03"
+sources:
+  - id: official_registry
+    label: Official corporate registry
+    source_type: official_registry
+    trust_tier: A
+    connector: good_standing
+    url_template: "{registry_search_url}"
+    notes: Use the Secretary of State or equivalent official registry for the incorporation jurisdiction.
+  - id: public_market_listing
+    label: Public market listing page
+    source_type: market_listing
+    trust_tier: A
+    connector: public_market_shortcut
+    url_template: "{public_listing_url}"
+    notes: Exchange or issuer listing page used to validate the public-market shortcut.
+  - id: google_search
+    label: Google Search
+    source_type: search_engine
+    trust_tier: B
+    connector: reputation_search
+    url_template: "https://www.google.com/search?q={query}&start={offset}"
+    notes: Capture page one and page two for each required query. Search snippets are evidence for review, not facts.
+  - id: bbb_search
+    label: Better Business Bureau
+    source_type: reputation
+    trust_tier: B
+    connector: bbb_review
+    url_template: "https://www.bbb.org/search?find_text={query}"
+    notes: Capture the result page and any negative reviews discovered from the result set.
+  - id: ofac_dataset
+    label: OFAC Sanctions List Service dataset export
+    source_type: sanctions_dataset
+    trust_tier: A
+    connector: ofac_precheck
+    url_template: "https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/ADVANCED_XML"
+    notes: Official dataset export used for a conservative automated precheck.
+  - id: ofac_search
+    label: OFAC Sanctions List Search
+    source_type: sanctions_search
+    trust_tier: A
+    connector: ofac_search
+    url_template: "https://sanctionssearch.ofac.treas.gov/"
+    notes: Official OFAC search surface. Policy requires a minimum name score of 90.

@@ -1,0 +1,92 @@
+version: "2026-04-04"
+decision_matrix_version: "2026-04-04"
+top_exchanges:
+  - New York Stock Exchange
+  - NASDAQ
+  - Shanghai Stock Exchange
+  - Japan Exchange Group
+  - Shenzhen Stock Exchange
+  - Hong Kong Stock Exchange
+  - Euronext
+  - National Stock Exchange of India
+  - BSE India
+  - London Stock Exchange
+steps:
+  - key: public_market_shortcut
+    order: 10
+    hard_gate: false
+    applies_to:
+      - entity
+    description: Verify whether the counterparty is publicly traded on one of the ten largest exchanges and document the evidence.
+    evidence_requirements:
+      - Screenshot or PDF of the public-market listing page
+      - Exchange name
+      - Stock symbol
+    manual_review_allowed: true
+  - key: entity_resolution
+    order: 15
+    hard_gate: true
+    applies_to:
+      - entity
+    description: Resolve the legal entity, jurisdiction, and official registry path needed for good-standing verification.
+    evidence_requirements:
+      - Legal entity name or authoritative alias
+      - Incorporation jurisdiction sufficient to choose the official registry
+      - Official registry result URL or official registry starting point
+    manual_review_allowed: true
+  - key: good_standing
+    order: 20
+    hard_gate: true
+    applies_to:
+      - entity
+    description: Verify the counterparty is active or in good standing in the place of incorporation.
+    evidence_requirements:
+      - Registry result page
+      - Saved PDF or equivalent capture of the result
+      - Captured legal name if available
+    manual_review_allowed: false
+  - key: reputation_search
+    order: 30
+    hard_gate: false
+    applies_to:
+      - entity
+      - individual
+    description: Review the first two pages of named web searches for fraud, scam, sued, and investigation signals.
+    evidence_requirements:
+      - Search result captures for all required search variants
+      - Analyst notes for any adverse findings
+    manual_review_allowed: true
+  - key: bbb_review
+    order: 40
+    hard_gate: false
+    applies_to:
+      - entity
+      - individual
+    description: Search Better Business Bureau and review any negative reviews.
+    evidence_requirements:
+      - BBB search result capture
+      - Captures or notes for negative reviews
+    manual_review_allowed: true
+  - key: ofac_precheck
+    order: 50
+    hard_gate: true
+    applies_to:
+      - entity
+      - individual
+    description: Run an automated precheck against current official OFAC dataset exports and surface any exact normalized matches.
+    evidence_requirements:
+      - Current official dataset metadata
+      - Match summary or clear result note
+    manual_review_allowed: true
+  - key: ofac_search
+    order: 60
+    hard_gate: true
+    applies_to:
+      - entity
+      - individual
+    description: Use the OFAC Search tool with minimum name score 90 and capture the result page.
+    evidence_requirements:
+      - Search input name
+      - Minimum name score 90
+      - Result-page capture
+    manual_review_allowed: true

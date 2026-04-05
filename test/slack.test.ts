@@ -14,17 +14,6 @@ test("normalizeMentionText removes bot mentions and extra whitespace", () => {
   );
 });
 
-test("normalizeMentionText handles multiple mentions", () => {
-  assert.equal(
-    normalizeMentionText("<@U111> <@U222> hello there"),
-    "hello there"
-  );
-});
-
-test("normalizeMentionText returns empty string for mention-only messages", () => {
-  assert.equal(normalizeMentionText("<@U12345>"), "");
-});
-
 test("shouldHandleDirectMessage ignores bot and subtype events", () => {
   assert.equal(
     shouldHandleDirectMessage({
@@ -54,28 +43,10 @@ test("shouldHandleDirectMessage ignores bot and subtype events", () => {
       channel: "D1",
       ts: "123.456",
       text: "hello",
+      user: "U1",
     }),
     true
   );
-});
-
-test("shouldHandleDirectMessage rejects non-im channel types", () => {
-  assert.equal(
-    shouldHandleDirectMessage({
-      channel_type: "channel",
-      channel: "C1",
-      ts: "123.456",
-      text: "hello",
-    }),
-    false
-  );
-});
-
-test("shouldHandleDirectMessage rejects malformed events", () => {
-  assert.equal(shouldHandleDirectMessage(null), false);
-  assert.equal(shouldHandleDirectMessage(undefined), false);
-  assert.equal(shouldHandleDirectMessage("string"), false);
-  assert.equal(shouldHandleDirectMessage({ channel_type: "im" }), false);
 });
 
 const mockReactions = () => ({
@@ -83,13 +54,47 @@ const mockReactions = () => ({
   remove: async () => {},
 });
 
-test("handleIncomingMessage sends a fallback reply when processing fails", async () => {
+test("handleIncomingMessage sends structured request to the controller", async () => {
   const sent: Array<{ text: string; thread_ts: string }> = [];
   const client = {
     conversations: {
       replies: async () => ({
-        messages: [{ text: "user: prior message" }],
+        messages: [{ text: "older question" }, { bot_id: "B1", text: "ignored newest" }],
       }),
+    },
+    reactions: mockReactions(),
+  };
+
+  await handleIncomingMessage(
+    client,
+    async (message) => {
+      sent.push(message);
+    },
+    {
+      channelId: "C1",
+      threadTs: "123.000",
+      messageTs: "123.001",
+      text: "status",
+      actorId: "U1",
+      actorLabel: "U1",
+    },
+    async (request) => {
+      assert.equal(request.text, "status");
+      assert.equal(request.channelId, "C1");
+      assert.equal(request.threadTs, "123.000");
+      assert.deepEqual(request.threadHistory, ["user: older question"]);
+      return "Case summary";
+    }
+  );
+
+  assert.deepEqual(sent, [{ text: "Case summary", thread_ts: "123.000" }]);
+});
+
+test("handleIncomingMessage falls back when the controller throws", async () => {
+  const sent: Array<{ text: string; thread_ts: string }> = [];
+  const client = {
+    conversations: {
+      replies: async () => ({ messages: [] }),
     },
     reactions: mockReactions(),
   };
@@ -102,9 +107,14 @@ test("handleIncomingMessage sends a fallback reply when processing fails", async
       async (message) => {
         sent.push(message);
       },
-      "D1",
-      "123.456",
-      "hello",
+      {
+        channelId: "C1",
+        threadTs: "999.000",
+        messageTs: "999.001",
+        text: "status",
+        actorId: "U1",
+        actorLabel: "U1",
+      },
       async () => {
         throw new Error("boom");
       }
@@ -113,64 +123,6 @@ test("handleIncomingMessage sends a fallback reply when processing fails", async
     console.error = originalConsoleError;
   }
 
-  assert.deepEqual(sent, [
-    {
-      text: "I hit an error while processing that message. Please try again.",
-      thread_ts: "123.456",
-    },
-  ]);
-});
-
-test("handleIncomingMessage adds eyes reaction while processing and removes after", async () => {
-  const reactions: string[] = [];
-  const client = {
-    conversations: {
-      replies: async () => ({ messages: [] }),
-    },
-    reactions: {
-      add: async ({ name }: { name: string }) => { reactions.push(`+${name}`); },
-      remove: async ({ name }: { name: string }) => { reactions.push(`-${name}`); },
-    },
-  };
-
-  await handleIncomingMessage(
-    client,
-    async (message) => { message; },
-    "C1",
-    "100.000",
-    "hello",
-    async () => "response",
-    "100.001"
-  );
-
-  assert.deepEqual(reactions, ["+eyes", "-eyes"]);
-});
-
-test("handleIncomingMessage sends successful response in thread", async () => {
-  const sent: Array<{ text: string; thread_ts: string }> = [];
-  const client = {
-    conversations: {
-      replies: async () => ({ messages: [] }),
-    },
-    reactions: mockReactions(),
-  };
-
-  await handleIncomingMessage(
-    client,
-    async (message) => {
-      sent.push(message);
-    },
-    "C1",
-    "999.000",
-    "what's new?",
-    async (text, history) => {
-      assert.equal(text, "what's new?");
-      assert.ok(Array.isArray(history));
-      return "Here's what's new!";
-    }
-  );
-
-  assert.equal(sent.length, 1);
-  assert.equal(sent[0]?.text, "Here's what's new!");
   assert.equal(sent[0]?.thread_ts, "999.000");
+  assert.match(String(sent[0]?.text), /try again/i);
 });

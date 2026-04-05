@@ -2,3 +2,7 @@ node_modules/
 .env
 dist/
 .claude/
+var/
+playwright-report/
+test-results/
+tmp-*.mts

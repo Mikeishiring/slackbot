@@ -129,6 +129,7 @@ graph LR
 ```bash
 git clone https://github.com/Mikeishiring/slackbot.git && cd slackbot
 npm install
+npm run setup          # installs Playwright Chromium for evidence capture
 cp .env.example .env   # then paste your 3 tokens
 npm start
 ```
@@ -137,8 +138,9 @@ npm start
 <summary>Windows PowerShell</summary>
 
 ```powershell
-Copy-Item .env.example .env
 npm install
+npm run setup
+Copy-Item .env.example .env
 npm start
 ```
 

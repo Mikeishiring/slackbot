@@ -1,0 +1,9 @@
+node_modules/
+.env
+var/
+.git/
+.claude/
+test/
+docs/
+*.md
+!README.md
