@@ -4329,6 +4329,206 @@ const KNOWN_ENTITY_SOURCE_HINTS: KnownEntitySourceHint[] = [
       ],
     },
   },
+  {
+    names: ["Kraken"],
+    websiteHosts: ["kraken.com", "www.kraken.com"],
+    evidenceCandidates: [
+      {
+        url: "https://www.kraken.com/legal",
+        title: "Kraken Legal",
+        sourceId: "company_website",
+        curatedPatch: {
+          legalName: "Payward, Inc.",
+          incorporationCountry: "US",
+          incorporationState: "DE",
+        },
+        curatedRationale: [
+          "curated mapping: OFAC settlement identifies Kraken as Payward, Inc.",
+          "curated mapping: SEC filings and Bloomberg identify Payward, Inc. as a Delaware corporation",
+        ],
+      },
+    ],
+    registrySuggestions: [
+      {
+        label: "Delaware entity name search",
+        url: "https://icis.corp.delaware.gov/Ecorp/EntitySearch/NameSearch.aspx",
+        notes: "Search Payward to find the Delaware corporate record.",
+        exactEntityName: "PAYWARD, INC.",
+        purpose: "locate_entity",
+        authorityUrl: "https://corp.delaware.gov/directweb/",
+      },
+    ],
+  },
+  {
+    names: ["Chainalysis"],
+    websiteHosts: ["chainalysis.com", "www.chainalysis.com"],
+    evidenceCandidates: [
+      {
+        url: "https://www.chainalysis.com/legal/",
+        title: "Chainalysis Legal",
+        sourceId: "company_website",
+        curatedPatch: {
+          legalName: "Chainalysis, Inc.",
+          incorporationCountry: "US",
+          incorporationState: "DE",
+        },
+        curatedRationale: [
+          "curated mapping: Chainalysis, Inc. is a Delaware corporation headquartered in New York",
+          "curated mapping: D&B and LinkedIn identify Chainalysis, Inc. as the primary legal entity",
+        ],
+      },
+    ],
+    registrySuggestions: [
+      {
+        label: "Delaware entity name search",
+        url: "https://icis.corp.delaware.gov/Ecorp/EntitySearch/NameSearch.aspx",
+        notes: "Search Chainalysis to find the Delaware corporate record.",
+        exactEntityName: "CHAINALYSIS, INC.",
+        purpose: "locate_entity",
+        authorityUrl: "https://corp.delaware.gov/directweb/",
+      },
+    ],
+  },
+  {
+    names: ["1inch", "1inch Network"],
+    websiteHosts: ["1inch.io", "1inch.com"],
+    evidenceCandidates: [
+      {
+        url: "https://1inch.io/assets/1inch_network_terms_of_use.pdf",
+        title: "1inch Network Terms of Use",
+        sourceId: "company_website",
+        curatedPatch: {
+          legalName: "1inch Limited",
+          incorporationCountry: "British Virgin Islands",
+        },
+        curatedRationale: [
+          "curated mapping: 1inch terms identify 1inch Limited (BVI) via Degensoft Ltd as operator",
+          "curated mapping: Crunchbase and D&B identify 1inch Limited in Road Town, Tortola, BVI",
+        ],
+      },
+    ],
+  },
+  {
+    names: ["Polymarket"],
+    websiteHosts: ["polymarket.com"],
+    evidenceCandidates: [
+      {
+        url: "https://polymarket.com/tos",
+        title: "Polymarket Terms of Service",
+        sourceId: "company_website",
+        curatedPatch: {
+          legalName: "Polymarket, Inc.",
+          incorporationCountry: "US",
+          incorporationState: "DE",
+        },
+        curatedRationale: [
+          "curated mapping: Polymarket terms and Crunchbase identify Polymarket, Inc. as a Delaware corporation",
+        ],
+      },
+    ],
+    registrySuggestions: [
+      {
+        label: "Delaware entity name search",
+        url: "https://icis.corp.delaware.gov/Ecorp/EntitySearch/NameSearch.aspx",
+        notes: "Search Polymarket to find the Delaware corporate record.",
+        exactEntityName: "POLYMARKET, INC.",
+        purpose: "locate_entity",
+        authorityUrl: "https://corp.delaware.gov/directweb/",
+      },
+    ],
+  },
+  {
+    names: ["Alchemy"],
+    websiteHosts: ["alchemy.com", "www.alchemy.com"],
+    evidenceCandidates: [
+      {
+        url: "https://www.alchemy.com/terms",
+        title: "Alchemy Terms of Service",
+        sourceId: "company_website",
+        curatedPatch: {
+          legalName: "Alchemy Insights, Inc.",
+          incorporationCountry: "US",
+          incorporationState: "DE",
+        },
+        curatedRationale: [
+          "curated mapping: Alchemy terms and Crunchbase identify Alchemy Insights, Inc. as a Delaware corporation",
+        ],
+      },
+    ],
+    registrySuggestions: [
+      {
+        label: "Delaware entity name search",
+        url: "https://icis.corp.delaware.gov/Ecorp/EntitySearch/NameSearch.aspx",
+        notes: "Search Alchemy Insights to find the Delaware corporate record.",
+        exactEntityName: "ALCHEMY INSIGHTS, INC.",
+        purpose: "locate_entity",
+        authorityUrl: "https://corp.delaware.gov/directweb/",
+      },
+    ],
+  },
+  {
+    names: ["Monad"],
+    websiteHosts: ["monad.xyz", "www.monad.xyz"],
+    evidenceCandidates: [
+      {
+        url: "https://www.monad.xyz/terms-of-service",
+        title: "Monad Terms of Service",
+        sourceId: "company_website",
+        curatedPatch: {
+          legalName: "Monad Foundation",
+        },
+        curatedRationale: [
+          "curated mapping: Monad terms identify the Monad Foundation as the operating entity",
+        ],
+      },
+    ],
+  },
+  {
+    names: ["Rain"],
+    websiteHosts: ["rain.com", "www.rain.com"],
+    evidenceCandidates: [
+      {
+        url: "https://www.rain.com/terms",
+        title: "Rain Terms of Service",
+        sourceId: "company_website",
+        curatedPatch: {
+          legalName: "Rain Management Inc.",
+        },
+        curatedRationale: [
+          "curated mapping: Rain company records identify Rain Management Inc. as the primary entity",
+        ],
+      },
+    ],
+  },
+  {
+    names: ["Mesh", "Mesh Connect"],
+    websiteHosts: ["meshconnect.com", "www.meshconnect.com"],
+    evidenceCandidates: [
+      {
+        url: "https://meshconnect.com/terms-of-service",
+        title: "Mesh Terms of Service",
+        sourceId: "company_website",
+        curatedPatch: {
+          legalName: "Mesh Connect, Inc.",
+          incorporationCountry: "US",
+          incorporationState: "DE",
+        },
+        curatedRationale: [
+          "curated mapping: Mesh terms identify Mesh Connect, Inc.",
+        ],
+      },
+    ],
+    registrySuggestions: [
+      {
+        label: "Delaware entity name search",
+        url: "https://icis.corp.delaware.gov/Ecorp/EntitySearch/NameSearch.aspx",
+        notes: "Search Mesh Connect to find the Delaware corporate record.",
+        exactEntityName: "MESH CONNECT, INC.",
+        purpose: "locate_entity",
+        authorityUrl: "https://corp.delaware.gov/directweb/",
+      },
+    ],
+  },
 ];
 
 async function runOfacSearch(
@@ -4515,15 +4715,20 @@ async function tryWebSearchEntityDiscovery(
   // Try to extract jurisdiction
   if (!caseRecord.incorporationCountry) {
     const jurisdictionPatterns: Array<{ pattern: RegExp; country: string; state?: string }> = [
-      { pattern: /(?:incorporated|registered|formed|organized)\s+in\s+Delaware/i, country: "US", state: "DE" },
-      { pattern: /Delaware\s+(?:corporation|company|entity|LLC)/i, country: "US", state: "DE" },
-      { pattern: /(?:incorporated|registered|formed|organized)\s+in\s+(?:the\s+)?Cayman\s+Islands/i, country: "Cayman Islands" },
-      { pattern: /(?:incorporated|registered|formed|organized)\s+in\s+Wyoming/i, country: "US", state: "WY" },
-      { pattern: /(?:incorporated|registered|formed|organized)\s+in\s+(?:the\s+)?(?:British\s+)?Virgin\s+Islands/i, country: "British Virgin Islands" },
-      { pattern: /(?:incorporated|registered|formed|organized)\s+in\s+New\s+York/i, country: "US", state: "NY" },
-      { pattern: /(?:incorporated|registered|formed|organized)\s+in\s+California/i, country: "US", state: "CA" },
-      { pattern: /(?:incorporated|registered|formed|organized)\s+in\s+Singapore/i, country: "Singapore" },
-      { pattern: /(?:incorporated|registered|formed|organized)\s+in\s+(?:the\s+)?(?:United\s+Kingdom|England|UK)/i, country: "United Kingdom" },
+      { pattern: /(?:incorporated|registered|formed|organized|based)\s+in\s+Delaware/i, country: "US", state: "DE" },
+      { pattern: /Delaware\s+(?:corporation|company|entity|LLC|Inc)/i, country: "US", state: "DE" },
+      { pattern: /(?:incorporated|registered|formed|organized|based)\s+in\s+(?:the\s+)?Cayman\s+Islands/i, country: "Cayman Islands" },
+      { pattern: /Cayman\s+Islands?\s+(?:corporation|company|entity|registered)/i, country: "Cayman Islands" },
+      { pattern: /(?:incorporated|registered|formed|organized|based)\s+in\s+Wyoming/i, country: "US", state: "WY" },
+      { pattern: /(?:incorporated|registered|formed|organized|based)\s+in\s+(?:the\s+)?(?:British\s+)?Virgin\s+Islands/i, country: "British Virgin Islands" },
+      { pattern: /\bBVI\b.*(?:corporation|company|registered|incorporated)/i, country: "British Virgin Islands" },
+      { pattern: /(?:Road\s+Town|Tortola).*(?:BVI|British\s+Virgin)/i, country: "British Virgin Islands" },
+      { pattern: /(?:incorporated|registered|formed|organized|based)\s+in\s+New\s+York/i, country: "US", state: "NY" },
+      { pattern: /New\s+York[,-]+based/i, country: "US", state: "NY" },
+      { pattern: /(?:incorporated|registered|formed|organized|based)\s+in\s+California/i, country: "US", state: "CA" },
+      { pattern: /San\s+Francisco[,-]+based/i, country: "US", state: "CA" },
+      { pattern: /(?:incorporated|registered|formed|organized|based)\s+in\s+Singapore/i, country: "Singapore" },
+      { pattern: /(?:incorporated|registered|formed|organized|based)\s+in\s+(?:the\s+)?(?:United\s+Kingdom|England|UK)/i, country: "United Kingdom" },
     ];
     for (const { pattern, country, state } of jurisdictionPatterns) {
       if (pattern.test(combined)) {
