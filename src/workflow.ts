@@ -1,5 +1,5 @@
 import type { ArtifactStore, CaptureService, ReportPublisher } from "./artifacts.js";
-import type { ConnectorContext, WebSearchClient, StepConnector } from "./connectors.js";
+import type { AdverseClassifier, ConnectorContext, WebSearchClient, StepConnector } from "./connectors.js";
 import { getApplicableSteps, isTopExchange } from "./policy.js";
 import { PolicyBotStorage } from "./storage.js";
 import type {
@@ -49,7 +49,8 @@ export class PolicyWorkflow {
     private readonly captureService: CaptureService | null,
     private readonly reportPublisher: ReportPublisher,
     private readonly options: WorkflowRuntimeOptions,
-    private readonly webSearchClient: WebSearchClient | null = null
+    private readonly webSearchClient: WebSearchClient | null = null,
+    private readonly adverseClassifier: AdverseClassifier | null = null
   ) {}
 
   public setOnStepComplete(callback: OnStepComplete): void {
@@ -413,6 +414,7 @@ export class PolicyWorkflow {
       artifactStore: this.artifactStore,
       captureService: this.captureService,
       webSearchClient: this.webSearchClient,
+      adverseClassifier: this.adverseClassifier,
     };
   }
 

@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { LocalCaseExporter, formatHealthSnapshot, formatRetentionPruneResult } from "./admin.js";
 import { LocalArtifactStore, LocalReportPublisher, PlaywrightCaptureService } from "./artifacts.js";
 import { BraveSearchClient, GoogleCustomSearchClient, RemoteOfacDatasetClient, createDefaultConnectors, type OfacDatasetClient } from "./connectors.js";
+import { AnthropicAdverseClassifier } from "./classifier.js";
 import type { AppConfig } from "./config.js";
 import { loadPolicyBundle } from "./policy.js";
 import { PolicyBotStorage } from "./storage.js";
@@ -107,7 +108,10 @@ export class PolicyBotRuntime {
               this.config.googleSearchApiKey,
               this.config.googleSearchEngineId
             )
-          : null
+          : null,
+      this.config.anthropicApiKey
+        ? new AnthropicAdverseClassifier(this.config.anthropicApiKey)
+        : null
     );
     this.exporter = new LocalCaseExporter(this.artifactStore, this.config.exportRoot);
   }

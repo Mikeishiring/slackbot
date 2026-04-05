@@ -31,6 +31,13 @@ import {
   uniqueStrings,
 } from "./utils.js";
 
+export interface AdverseClassifier {
+  classify(
+    counterpartyName: string,
+    results: Array<{ title: string; snippet: string; url: string }>
+  ): Promise<Array<{ url: string; classification: "enforcement" | "litigation" | "noise" | "unclear"; reason: string }>>;
+}
+
 export interface ConnectorContext {
   snapshot: CaseSnapshot;
   policy: PolicyBundle;
@@ -38,6 +45,7 @@ export interface ConnectorContext {
   artifactStore: ArtifactStore;
   captureService: CaptureService | null;
   webSearchClient: WebSearchClient | null;
+  adverseClassifier: AdverseClassifier | null;
 }
 
 export interface StepConnector {
@@ -847,11 +855,11 @@ export class GoodStandingConnector implements StepConnector {
 
     const registryUrl = context.snapshot.caseRecord.registrySearchUrl?.trim() ?? "";
 
-    // Try automated Delaware ICIS lookup before falling back to manual routing
-    if (isDelawareJurisdiction(caseRecord.incorporationCountry, caseRecord.incorporationState)) {
-      const delawareResult = await tryDelawareIcisLookup(context, caseRecord);
-      if (delawareResult) {
-        return delawareResult;
+    // Try automated registry status lookup via web search before manual routing
+    if (context.webSearchClient && caseRecord.legalName && caseRecord.incorporationCountry) {
+      const searchResult = await tryRegistryStatusSearch(context, caseRecord);
+      if (searchResult) {
+        return searchResult;
       }
     }
 
@@ -1258,16 +1266,47 @@ export class ReputationSearchConnector implements StepConnector {
     );
     const degradedPages = pageSummaries.filter((page) => page.structureStatus !== "ok");
     const hasReliableResults = extractedResultCount > 0 && degradedPages.length === 0 && captureFailures.length === 0;
-    const canAutoPass = hasReliableResults && likelyAdverseCount === 0;
+
+    // If adverse results found and classifier available, classify them to filter noise
+    let realAdverseCount = likelyAdverseCount;
+    let classificationNote = "";
+    if (likelyAdverseCount > 0 && context.adverseClassifier) {
+      const adverseResults = pageSummaries
+        .flatMap((page) => page.results.filter((r) => r.adverseKeywords.length > 0))
+        .map((r) => ({ title: r.title, snippet: r.snippet ?? "", url: r.url }));
+
+      const classifications = await context.adverseClassifier.classify(name, adverseResults);
+      const realAdverse = classifications.filter(
+        (c) => c.classification === "enforcement" || c.classification === "litigation"
+      );
+      realAdverseCount = realAdverse.length;
+      classificationNote = ` (${likelyAdverseCount} keyword matches, ${realAdverseCount} classified as real after LLM review)`;
+
+      const classificationArtifact = await context.artifactStore.saveArtifact({
+        caseId: context.snapshot.caseRecord.id,
+        stepKey: this.stepKey,
+        title: "Adverse Result Classification",
+        sourceId: "google_search",
+        sourceUrl: null,
+        fileName: "adverse-classification.json",
+        contentType: "application/json",
+        body: JSON.stringify({ classifications, realAdverseCount, totalFlagged: likelyAdverseCount }, null, 2),
+        category: "evidence",
+        metadata: { realAdverseCount, totalFlagged: likelyAdverseCount },
+      });
+      evidenceIds.push(classificationArtifact.id);
+    }
+
+    const canAutoPass = hasReliableResults && realAdverseCount === 0;
 
     return {
       status: canAutoPass ? "passed" : "manual_review_required",
       note: canAutoPass
-        ? `No adverse keywords found across ${extractedResultCount} search results from ${queries.length} queries. Auto-cleared.`
+        ? `No real adverse findings across ${extractedResultCount} search results${classificationNote}. Auto-cleared.`
         : degradedPages.length > 0
           ? `Prepared search evidence, but ${degradedPages.length} page extraction(s) look degraded and need manual review.`
-          : likelyAdverseCount > 0
-            ? `Found ${likelyAdverseCount} result(s) with adverse keywords across ${extractedResultCount} candidates. Manual review required.`
+          : realAdverseCount > 0
+            ? `Found ${realAdverseCount} potentially real adverse result(s)${classificationNote}. Manual review required.`
             : captureFailures.length > 0
               ? `Prepared search evidence with ${captureFailures.length} capture failure(s).`
               : `Prepared search evidence and extracted ${extractedResultCount} result candidates for analyst review.`,
@@ -3125,6 +3164,29 @@ function buildOfficialRegistrySuggestions(
     ];
   }
 
+  if (isBviCountry(incorporationCountry)) {
+    return [
+      {
+        label: "BVI Financial Services Commission registry",
+        url: "https://www.bvifsc.vg/",
+        notes: "The BVI FSC maintains the registry of companies. Online search may require registration.",
+        purpose: "locate_entity",
+        requiresRegistration: true,
+      },
+    ];
+  }
+
+  if (isSingaporeCountry(incorporationCountry)) {
+    return [
+      {
+        label: "ACRA BizFile+ entity search",
+        url: "https://www.bizfile.gov.sg/",
+        notes: "Singapore's official ACRA business registry. Basic entity search is free.",
+        purpose: "locate_entity",
+      },
+    ];
+  }
+
   if (!isUsCountry(incorporationCountry)) {
     return [];
   }
@@ -3181,6 +3243,30 @@ function buildOfficialRegistrySuggestions(
           label: "New Jersey business records service",
           url: "https://www.njportal.com/DOR/BusinessNameSearch",
           notes: "Use the legal name in the official New Jersey business record search.",
+        },
+      ];
+    case "IL":
+      return [
+        {
+          label: "Illinois Secretary of State business search",
+          url: "https://apps.ilsos.gov/corporatellc/",
+          notes: "Use the legal name to search the Illinois SOS corporate/LLC database.",
+        },
+      ];
+    case "FL":
+      return [
+        {
+          label: "Florida Division of Corporations (Sunbiz)",
+          url: "https://search.sunbiz.org/Inquiry/CorporationSearch/ByName",
+          notes: "Use the legal name to search the Florida Sunbiz corporate database.",
+        },
+      ];
+    case "WY":
+      return [
+        {
+          label: "Wyoming Secretary of State business search",
+          url: "https://wyobiz.wyo.gov/Business/FilingSearch.aspx",
+          notes: "Use the legal name to search the Wyoming SOS business database.",
         },
       ];
     default:
@@ -4152,6 +4238,20 @@ function isCaymanCountry(value: string | null): boolean {
   return normalized === "cayman islands" || normalized === "cayman";
 }
 
+function isBviCountry(value: string | null): boolean {
+  const normalized = normalizeName(value ?? "");
+  return (
+    normalized === "british virgin islands" ||
+    normalized === "bvi" ||
+    normalized === "virgin islands british"
+  );
+}
+
+function isSingaporeCountry(value: string | null): boolean {
+  const normalized = normalizeName(value ?? "");
+  return normalized === "singapore" || normalized === "sg";
+}
+
 function isDelawareJurisdiction(
   incorporationCountry: string | null,
   incorporationState: string | null
@@ -5021,180 +5121,140 @@ function deriveIndustryQualifier(
   return null;
 }
 
-async function tryDelawareIcisLookup(
+async function tryRegistryStatusSearch(
   context: ConnectorContext,
   caseRecord: CaseSnapshot["caseRecord"]
 ): Promise<StepExecutionResult | null> {
-  if (!context.captureService) {
+  if (!context.webSearchClient || !caseRecord.legalName) {
     return null;
   }
 
-  const hint = getKnownEntitySourceHint(caseRecord);
-  const delawareSuggestion = hint?.registrySuggestions?.find(
-    (suggestion) =>
-      suggestion.url.includes("icis.corp.delaware.gov") && suggestion.fileNumber
+  const jurisdiction = describeRegistryJurisdiction(
+    caseRecord.incorporationCountry,
+    caseRecord.incorporationState
+  );
+  const entityName = caseRecord.legalName;
+
+  const queries = [
+    `"${entityName}" ${jurisdiction} entity status active`,
+    `"${entityName}" ${jurisdiction} corporation good standing`,
+    `"${entityName}" site:icis.corp.delaware.gov OR site:opencorporates.com OR site:sunbiz.org`,
+  ];
+
+  const allSnippets: Array<{ title: string; snippet: string; url: string }> = [];
+  for (const query of queries) {
+    try {
+      const results = await context.webSearchClient.search(query, 0);
+      for (const result of results.slice(0, 5)) {
+        allSnippets.push({
+          title: result.title,
+          snippet: result.snippet,
+          url: result.link,
+        });
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  if (allSnippets.length === 0) {
+    return null;
+  }
+
+  const combined = allSnippets.map((s) => `${s.title} ${s.snippet}`).join(" ");
+  const statusEvidence = findGoodStandingIndicator(combined);
+
+  // Only trust the result if we found a clear signal from an authoritative source
+  const authoritativeDomains = [
+    "icis.corp.delaware.gov", "opencorporates.com", "sunbiz.org",
+    "sos.ca.gov", "sos.state.il.us", "ilsos.gov",
+    "sec.gov", "bloomberg.com", "dnb.com",
+    "find-and-update.company-information.service.gov.uk",
+  ];
+  const hasAuthoritativeSource = allSnippets.some(
+    (s) => authoritativeDomains.some((domain) => s.url.includes(domain))
   );
 
-  const entityName = delawareSuggestion?.exactEntityName ?? caseRecord.legalName ?? caseRecord.displayName;
-  const fileNumber = delawareSuggestion?.fileNumber ?? null;
+  // Also check for direct status mentions near the entity name
+  const entityNameLower = entityName.toLowerCase();
+  const hasDirectStatusMention = allSnippets.some((s) => {
+    const text = `${s.title} ${s.snippet}`.toLowerCase();
+    return (
+      text.includes(entityNameLower) &&
+      (text.includes("active") || text.includes("good standing") ||
+       text.includes("inactive") || text.includes("revoked") ||
+       text.includes("void") || text.includes("dissolved"))
+    );
+  });
 
-  try {
-    const browser = await chromium.launch({
-      headless: true,
-      args: ["--disable-http2", "--disable-blink-features=AutomationControlled", "--no-sandbox"],
-    });
-
-    try {
-      const browserContext = await browser.newContext({
-        userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-      });
-      const page = await browserContext.newPage();
-
-      await page.goto("https://icis.corp.delaware.gov/Ecorp/EntitySearch/NameSearch.aspx", {
-        waitUntil: "domcontentloaded",
-        timeout: 20_000,
-      });
-
-      // Try file number search first (most precise)
-      if (fileNumber) {
-        const fileNumberTab = page.locator('a[href*="FileNumSearch"]').first();
-        if (await fileNumberTab.isVisible({ timeout: 3_000 }).catch(() => false)) {
-          await fileNumberTab.click();
-          await page.waitForTimeout(1_000);
-          const fileInput = page.locator('input[name*="FileNumber"], input[id*="FileNumber"]').first();
-          if (await fileInput.isVisible({ timeout: 3_000 }).catch(() => false)) {
-            await fileInput.fill(fileNumber);
-            await page.locator('input[type="submit"], button[type="submit"]').first().click();
-            await page.waitForLoadState("domcontentloaded", { timeout: 15_000 });
-          }
-        }
-      } else {
-        // Name search
-        const nameInput = page.locator('input[name*="EntityName"], input[id*="EntityName"]').first();
-        if (await nameInput.isVisible({ timeout: 5_000 }).catch(() => false)) {
-          await nameInput.fill(entityName);
-          await page.locator('input[type="submit"], button[type="submit"]').first().click();
-          await page.waitForLoadState("domcontentloaded", { timeout: 15_000 });
-        }
-      }
-
-      // Look for entity link in results and click through
-      const entityLink = page.locator('a[href*="EntitySearch/EntityDetails"]').first();
-      if (await entityLink.isVisible({ timeout: 5_000 }).catch(() => false)) {
-        await entityLink.click();
-        await page.waitForLoadState("domcontentloaded", { timeout: 15_000 });
-      }
-
-      const pageContent = await page.content();
-      const pageText = await page.innerText("body").catch(() => "");
-      const finalUrl = page.url();
-
-      // Take screenshot
-      const screenshot = await page.screenshot({ fullPage: true }).catch(() => null);
-
-      await browserContext.close();
-
-      // Save artifacts
-      const htmlArtifact = await context.artifactStore.saveArtifact({
-        caseId: caseRecord.id,
-        stepKey: "good_standing",
-        title: "Delaware ICIS Registry Result",
-        sourceId: "official_registry",
-        sourceUrl: finalUrl,
-        fileName: "delaware-icis-result.html",
-        contentType: "text/html",
-        body: pageContent,
-        category: "evidence",
-        metadata: { sourceUrl: finalUrl, searchMode: "automated_icis", entityName, fileNumber },
-      });
-
-      const evidenceIds = [htmlArtifact.id];
-
-      if (screenshot) {
-        const screenshotArtifact = await context.artifactStore.saveArtifact({
-          caseId: caseRecord.id,
-          stepKey: "good_standing",
-          title: "Delaware ICIS Screenshot",
-          sourceId: "official_registry",
-          sourceUrl: finalUrl,
-          fileName: "delaware-icis-screenshot.png",
-          contentType: "image/png",
-          body: screenshot,
-          category: "evidence",
-          metadata: { sourceUrl: finalUrl, captureType: "screenshot" },
-        });
-        evidenceIds.push(screenshotArtifact.id);
-      }
-
-      // Only trust status indicators if we landed on an entity detail page, not search results
-      const isDetailPage =
-        finalUrl.includes("EntityDetails") ||
-        finalUrl.includes("entitydetails");
-      const isSearchResultsPage =
-        pageText.includes("search results will return both active and inactive") ||
-        pageText.includes("Entity Name to search") ||
-        finalUrl.includes("NameSearch") ||
-        finalUrl.includes("FileNumSearch");
-
-      if (!isDetailPage || isSearchResultsPage) {
-        return null;
-      }
-
-      const statusEvidence = findGoodStandingIndicator(pageText);
-
-      if (statusEvidence.negativeMatch) {
-        return {
-          status: "failed",
-          note: `Delaware ICIS showed negative status: ${statusEvidence.negativeMatch}.`,
-          facts: [{
-            stepKey: "good_standing",
-            factKey: "good_standing_status",
-            summary: `Delaware ICIS automated lookup found negative status: ${statusEvidence.negativeMatch}.`,
-            value: { registrySearchUrl: finalUrl, negativeMatch: statusEvidence.negativeMatch, searchMode: "automated_icis" },
-            verificationStatus: "verified",
-            sourceId: "official_registry",
-            evidenceIds,
-            freshnessExpiresAt: addDays(new Date().toISOString(), 90),
-          }],
-          issues: [{
-            stepKey: "good_standing",
-            severity: "high",
-            title: "Entity not in good standing",
-            detail: `Delaware ICIS: ${statusEvidence.negativeMatch}`,
-            evidenceIds,
-          }],
-          reviewTasks: [],
-        };
-      }
-
-      if (statusEvidence.positiveMatch) {
-        return {
-          status: "passed",
-          note: `Delaware ICIS confirmed active status: ${statusEvidence.positiveMatch}. Auto-verified.`,
-          facts: [{
-            stepKey: "good_standing",
-            factKey: "good_standing_status",
-            summary: `Delaware ICIS automated lookup confirmed: ${statusEvidence.positiveMatch}.`,
-            value: { registrySearchUrl: finalUrl, positiveMatch: statusEvidence.positiveMatch, searchMode: "automated_icis" },
-            verificationStatus: "verified",
-            sourceId: "official_registry",
-            evidenceIds,
-            freshnessExpiresAt: addDays(new Date().toISOString(), 90),
-          }],
-          issues: [],
-          reviewTasks: [],
-        };
-      }
-
-      // Got a page but couldn't determine status — still an improvement, save evidence
-      return null;
-    } finally {
-      await browser.close();
-    }
-  } catch (error) {
-    console.error("Delaware ICIS automated lookup failed", error);
+  if (!hasDirectStatusMention && !hasAuthoritativeSource) {
     return null;
   }
+
+  // Save evidence
+  const artifact = await context.artifactStore.saveArtifact({
+    caseId: caseRecord.id,
+    stepKey: "good_standing",
+    title: "Registry Status Web Search",
+    sourceId: "official_registry",
+    sourceUrl: null,
+    fileName: "registry-status-search.json",
+    contentType: "application/json",
+    body: JSON.stringify({ queries, snippets: allSnippets, statusEvidence }, null, 2),
+    category: "evidence",
+    metadata: { searchMode: "web_search_registry_status", jurisdiction },
+  });
+  const evidenceIds = [artifact.id];
+
+  if (statusEvidence.negativeMatch && hasDirectStatusMention) {
+    return {
+      status: "failed",
+      note: `Web search found negative registry status for ${entityName}: ${statusEvidence.negativeMatch}.`,
+      facts: [{
+        stepKey: "good_standing",
+        factKey: "good_standing_status",
+        summary: `Web search registry check found negative status: ${statusEvidence.negativeMatch}.`,
+        value: { entityName, jurisdiction, negativeMatch: statusEvidence.negativeMatch, searchMode: "web_search" },
+        verificationStatus: "inferred",
+        sourceId: "official_registry",
+        evidenceIds,
+        freshnessExpiresAt: addDays(new Date().toISOString(), 30),
+      }],
+      issues: [{
+        stepKey: "good_standing",
+        severity: "high",
+        title: "Registry search indicates entity may not be active",
+        detail: `Web search for "${entityName}" in ${jurisdiction} found: ${statusEvidence.negativeMatch}. Manual verification recommended.`,
+        evidenceIds,
+      }],
+      reviewTasks: [{
+        stepKey: "good_standing",
+        title: "Verify negative registry status",
+        instructions: `Web search indicated ${statusEvidence.negativeMatch}. Open the official registry and confirm before rejecting.`,
+      }],
+    };
+  }
+
+  if (statusEvidence.positiveMatch && hasDirectStatusMention) {
+    return {
+      status: "passed",
+      note: `Web search confirmed ${entityName} is ${statusEvidence.positiveMatch} in ${jurisdiction}. Auto-verified.`,
+      facts: [{
+        stepKey: "good_standing",
+        factKey: "good_standing_status",
+        summary: `Web search registry check confirmed: ${statusEvidence.positiveMatch} in ${jurisdiction}.`,
+        value: { entityName, jurisdiction, positiveMatch: statusEvidence.positiveMatch, searchMode: "web_search", sources: allSnippets.slice(0, 3).map((s) => s.url) },
+        verificationStatus: "verified",
+        sourceId: "official_registry",
+        evidenceIds,
+        freshnessExpiresAt: addDays(new Date().toISOString(), 90),
+      }],
+      issues: [],
+      reviewTasks: [],
+    };
+  }
+
+  return null;
 }
 
 async function tryWebApiSearch(
