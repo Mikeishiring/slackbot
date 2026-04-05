@@ -632,6 +632,23 @@ export class EntityResolutionConnector implements StepConnector {
       );
     }
 
+    // If we still don't have legal name or jurisdiction, try web search discovery
+    if (context.webSearchClient && (!resolvedCaseRecord.legalName || !resolvedCaseRecord.incorporationCountry)) {
+      const webDiscovery = await tryWebSearchEntityDiscovery(
+        context,
+        resolvedCaseRecord
+      );
+      if (Object.keys(webDiscovery.casePatch).length > 0) {
+        context.storage.updateCaseScreeningFields(
+          resolvedCaseRecord.id,
+          webDiscovery.casePatch
+        );
+        resolvedCaseRecord = applyCasePatch(resolvedCaseRecord, webDiscovery.casePatch);
+      }
+      websiteInference.facts.push(...webDiscovery.facts);
+      websiteInference.issues.push(...webDiscovery.issues);
+    }
+
     const genericRegistryRouting = await buildEntityResolutionRouting(
       context,
       resolvedCaseRecord
@@ -4437,6 +4454,124 @@ async function runOfacSearch(
 
 function defaultUserAgent(): string {
   return "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36";
+}
+
+async function tryWebSearchEntityDiscovery(
+  context: ConnectorContext,
+  caseRecord: CaseSnapshot["caseRecord"]
+): Promise<{
+  casePatch: UpdateCaseScreeningInput;
+  facts: NewFactInput[];
+  issues: NewIssueInput[];
+}> {
+  if (!context.webSearchClient) {
+    return { casePatch: {}, facts: [], issues: [] };
+  }
+
+  const queries = [
+    `"${caseRecord.displayName}" legal entity incorporation`,
+    `"${caseRecord.displayName}" Inc LLC Ltd incorporated Delaware`,
+  ];
+
+  const allSnippets: string[] = [];
+  for (const query of queries) {
+    try {
+      const results = await context.webSearchClient.search(query, 0);
+      for (const result of results) {
+        allSnippets.push(`${result.title} ${result.snippet}`);
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  if (allSnippets.length === 0) {
+    return { casePatch: {}, facts: [], issues: [] };
+  }
+
+  const combined = allSnippets.join(" ");
+  const casePatch: UpdateCaseScreeningInput = {};
+  const discoveredDetails: string[] = [];
+
+  // Try to extract legal name
+  if (!caseRecord.legalName) {
+    const namePatterns = [
+      new RegExp(`(${escapeRegex(caseRecord.displayName)}[\\w\\s]*?,?\\s*(?:Inc\\.?|LLC|Ltd\\.?|PBC|Corp\\.?|Limited|PTE\\.?\\s*LTD\\.?))`, "i"),
+      /(?:operated by|owned by|provided by|a service of|legal(?:ly)?\s+(?:named?|known as|entity))\s+([A-Z][\w\s,]+?(?:Inc\.?|LLC|Ltd\.?|PBC|Corp\.?|Limited))/i,
+    ];
+    for (const pattern of namePatterns) {
+      const match = pattern.exec(combined);
+      if (match?.[1]) {
+        const name = match[1].trim().replace(/,\s*$/, "");
+        if (name.length > 3 && name.length < 80) {
+          casePatch.legalName = name;
+          discoveredDetails.push(`legal name: ${name}`);
+          break;
+        }
+      }
+    }
+  }
+
+  // Try to extract jurisdiction
+  if (!caseRecord.incorporationCountry) {
+    const jurisdictionPatterns: Array<{ pattern: RegExp; country: string; state?: string }> = [
+      { pattern: /(?:incorporated|registered|formed|organized)\s+in\s+Delaware/i, country: "US", state: "DE" },
+      { pattern: /Delaware\s+(?:corporation|company|entity|LLC)/i, country: "US", state: "DE" },
+      { pattern: /(?:incorporated|registered|formed|organized)\s+in\s+(?:the\s+)?Cayman\s+Islands/i, country: "Cayman Islands" },
+      { pattern: /(?:incorporated|registered|formed|organized)\s+in\s+Wyoming/i, country: "US", state: "WY" },
+      { pattern: /(?:incorporated|registered|formed|organized)\s+in\s+(?:the\s+)?(?:British\s+)?Virgin\s+Islands/i, country: "British Virgin Islands" },
+      { pattern: /(?:incorporated|registered|formed|organized)\s+in\s+New\s+York/i, country: "US", state: "NY" },
+      { pattern: /(?:incorporated|registered|formed|organized)\s+in\s+California/i, country: "US", state: "CA" },
+      { pattern: /(?:incorporated|registered|formed|organized)\s+in\s+Singapore/i, country: "Singapore" },
+      { pattern: /(?:incorporated|registered|formed|organized)\s+in\s+(?:the\s+)?(?:United\s+Kingdom|England|UK)/i, country: "United Kingdom" },
+    ];
+    for (const { pattern, country, state } of jurisdictionPatterns) {
+      if (pattern.test(combined)) {
+        casePatch.incorporationCountry = country;
+        if (state) {
+          casePatch.incorporationState = state;
+        }
+        discoveredDetails.push(`jurisdiction: ${state ? `${state}, ` : ""}${country}`);
+        break;
+      }
+    }
+  }
+
+  if (discoveredDetails.length === 0) {
+    return { casePatch: {}, facts: [], issues: [] };
+  }
+
+  const artifact = await context.artifactStore.saveArtifact({
+    caseId: caseRecord.id,
+    stepKey: "entity_resolution",
+    title: "Web Search Entity Discovery",
+    sourceId: "google_search",
+    sourceUrl: null,
+    fileName: "web-search-entity-discovery.json",
+    contentType: "application/json",
+    body: JSON.stringify({ queries, discoveredDetails, casePatch }, null, 2),
+    category: "evidence",
+    metadata: { searchMode: "web_search_discovery", discoveredDetails },
+  });
+
+  return {
+    casePatch,
+    facts: [{
+      stepKey: "entity_resolution",
+      factKey: "web_search_entity_discovery",
+      summary: `Web search discovered: ${discoveredDetails.join("; ")}.`,
+      value: { discoveredDetails, casePatch },
+      verificationStatus: "inferred",
+      sourceId: "google_search",
+      evidenceIds: [artifact.id],
+      freshnessExpiresAt: addDays(new Date().toISOString(), 30),
+    }],
+    issues: [],
+  };
+}
+
+function escapeRegex(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function deriveIndustryQualifier(
