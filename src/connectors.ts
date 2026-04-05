@@ -4285,8 +4285,29 @@ function normalizeStateToken(value: string | null): string | null {
     case "nj":
     case "new jersey":
       return "NJ";
+    case "il":
+    case "illinois":
+      return "IL";
+    case "fl":
+    case "florida":
+      return "FL";
+    case "wy":
+    case "wyoming":
+      return "WY";
+    case "tx":
+    case "texas":
+      return "TX";
+    case "wa":
+    case "washington":
+      return "WA";
+    case "co":
+    case "colorado":
+      return "CO";
+    case "ma":
+    case "massachusetts":
+      return "MA";
     default:
-      return null;
+      return value?.toUpperCase().trim() ?? null;
   }
 }
 
@@ -4818,10 +4839,24 @@ const KNOWN_ENTITY_SOURCE_HINTS: KnownEntitySourceHint[] = [
         url: "https://bebop.xyz/terms",
         title: "Bebop Terms",
         sourceId: "company_website",
-        curatedPatch: {},
+        curatedPatch: {
+          legalName: "Wintermute Trading Ltd",
+          incorporationCountry: "United Kingdom",
+          notes: "Bebop is a product of Wintermute Trading Ltd (UK Companies House #10882520)",
+        },
         curatedRationale: [
-          "curated mapping: Bebop is incubated by Wintermute, specific legal entity not publicly identified",
+          "curated mapping: Bebop is incubated/operated by Wintermute Trading Ltd, a UK company (Companies House #10882520)",
+          "curated mapping: Wintermute Trading Ltd registered at 3rd Floor, 1 Ashley Road, Altrincham, WA14 2DT, UK",
         ],
+      },
+    ],
+    registrySuggestions: [
+      {
+        label: "UK Companies House search",
+        url: "https://find-and-update.company-information.service.gov.uk/search/companies",
+        notes: "Search Wintermute Trading to find the UK corporate record.",
+        exactEntityName: "WINTERMUTE TRADING LTD",
+        purpose: "locate_entity",
       },
     ],
   },
@@ -4833,10 +4868,25 @@ const KNOWN_ENTITY_SOURCE_HINTS: KnownEntitySourceHint[] = [
         url: "https://www.arc.network/terms",
         title: "Arc Network Terms",
         sourceId: "company_website",
-        curatedPatch: {},
+        curatedPatch: {
+          legalName: "Circle Internet Group, Inc.",
+          incorporationCountry: "US",
+          incorporationState: "DE",
+        },
         curatedRationale: [
-          "curated mapping: Arc is a Circle product (Circle Internet Group, Inc., Delaware). The Arc L1 is operated by Circle.",
+          "curated mapping: Arc is a product of Circle. The contracting entity is Circle Internet Group, Inc., a Delaware corporation.",
+          "curated mapping: Circle is publicly listed (NYSE: CRCL) and files with the SEC.",
         ],
+      },
+    ],
+    registrySuggestions: [
+      {
+        label: "Delaware entity name search",
+        url: "https://icis.corp.delaware.gov/Ecorp/EntitySearch/NameSearch.aspx",
+        notes: "Search Circle Internet Group to find the Delaware corporate record.",
+        exactEntityName: "CIRCLE INTERNET GROUP, INC.",
+        purpose: "locate_entity",
+        authorityUrl: "https://corp.delaware.gov/directweb/",
       },
     ],
   },
@@ -5147,9 +5197,9 @@ async function tryRegistryStatusSearch(
   const entityName = caseRecord.legalName;
 
   const queries = [
+    `"${entityName}" site:opencorporates.com`,
     `"${entityName}" ${jurisdiction} entity status active`,
-    `"${entityName}" ${jurisdiction} corporation good standing`,
-    `"${entityName}" site:icis.corp.delaware.gov OR site:opencorporates.com OR site:sunbiz.org`,
+    `"${entityName}" ${jurisdiction} corporation good standing registered`,
   ];
 
   const allSnippets: Array<{ title: string; snippet: string; url: string }> = [];
