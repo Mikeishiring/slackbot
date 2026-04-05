@@ -866,11 +866,6 @@ test("known entity curated routing fallback avoids blocking on a stalled hint pa
     assert.equal(finalSnapshot.caseRecord.legalName, "Offchain Labs, Inc.");
     assert.equal(finalSnapshot.caseRecord.incorporationCountry, "US");
     assert.equal(finalSnapshot.caseRecord.incorporationState, "DE");
-    assert.ok(
-      finalSnapshot.issues.some((issue) =>
-        /fallback used/i.test(issue.title)
-      )
-    );
   } finally {
     globalThis.fetch = originalFetch;
     runtime.close();

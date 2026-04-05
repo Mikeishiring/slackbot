@@ -16,7 +16,7 @@ export class AnthropicAdverseClassifier implements AdverseClassifier {
   private readonly client: Anthropic;
   private readonly model: string;
 
-  public constructor(apiKey: string, model = "claude-haiku-4-5-20251001") {
+  public constructor(apiKey: string, model = "claude-sonnet-4-20250514") {
     this.client = new Anthropic({ apiKey, timeout: 15_000, maxRetries: 1 });
     this.model = model;
   }
