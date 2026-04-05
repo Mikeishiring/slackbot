@@ -4547,6 +4547,159 @@ const KNOWN_ENTITY_SOURCE_HINTS: KnownEntitySourceHint[] = [
       },
     ],
   },
+  {
+    names: ["0x", "ZeroEx"],
+    websiteHosts: ["0x.org"],
+    evidenceCandidates: [
+      {
+        url: "https://0x.org/legal/terms-of-service",
+        title: "0x Terms of Service",
+        sourceId: "company_website",
+        curatedPatch: {
+          legalName: "ZeroEx, Inc.",
+          incorporationCountry: "US",
+          incorporationState: "DE",
+        },
+        curatedRationale: [
+          "curated mapping: CFTC enforcement order identifies ZeroEx, Inc. as a Delaware corporation",
+          "curated mapping: USPTO trademark filing confirms ZeroEx Holdings, Inc. in Delaware",
+        ],
+      },
+    ],
+    registrySuggestions: [
+      {
+        label: "Delaware entity name search",
+        url: "https://icis.corp.delaware.gov/Ecorp/EntitySearch/NameSearch.aspx",
+        notes: "Search ZeroEx to find the Delaware corporate record.",
+        exactEntityName: "ZEROEX, INC.",
+        purpose: "locate_entity",
+        authorityUrl: "https://corp.delaware.gov/directweb/",
+      },
+    ],
+  },
+  {
+    names: ["Chainlink", "Chainlink Labs"],
+    websiteHosts: ["chain.link", "chainlinklabs.com"],
+    evidenceCandidates: [
+      {
+        url: "https://chain.link/legal",
+        title: "Chainlink Legal",
+        sourceId: "company_website",
+        curatedPatch: {
+          legalName: "SmartContract Chainlink Ltd. SEZC",
+          incorporationCountry: "Cayman Islands",
+        },
+        curatedRationale: [
+          "curated mapping: Chainlink terms identify SmartContract Chainlink Ltd. SEZC as a Cayman Islands entity",
+          "curated mapping: UK Companies House shows Chainlink Labs Ltd. in England, Chainlink Labs Inc. in Florida",
+        ],
+      },
+    ],
+    entityStructure: {
+      brand: "Chainlink",
+      scopeNote:
+        "Chainlink operates through multiple entities: SmartContract Chainlink Ltd. SEZC (Cayman), Chainlink Labs Inc. (Florida), Chainlink Labs Ltd. (UK). Confirm which entity is in scope.",
+      entities: [
+        {
+          legalName: "SmartContract Chainlink Ltd. SEZC",
+          jurisdiction: "Cayman Islands",
+          role: "Primary contracting entity per terms of service",
+        },
+        {
+          legalName: "Chainlink Labs Inc.",
+          jurisdiction: "FL, US",
+          role: "US operational entity",
+          registrySearchUrl: "https://search.sunbiz.org/",
+          notes: ["OpenCorporates: Florida entity F21000002658"],
+        },
+        {
+          legalName: "Chainlink Labs Ltd.",
+          jurisdiction: "United Kingdom",
+          role: "UK entity, Companies House 12592492",
+        },
+      ],
+    },
+  },
+  {
+    names: ["bloXroute", "bloXroute Labs"],
+    websiteHosts: ["bloxroute.com"],
+    evidenceCandidates: [
+      {
+        url: "https://bloxroute.com/terms-of-service",
+        title: "bloXroute Terms of Service",
+        sourceId: "company_website",
+        curatedPatch: {
+          legalName: "bloXroute Labs, Inc.",
+          incorporationCountry: "US",
+          incorporationState: "IL",
+        },
+        curatedRationale: [
+          "curated mapping: SEC Form D filing identifies bloXroute Labs, Inc.",
+          "curated mapping: Bloomberg and Crunchbase identify bloXroute Labs, Inc. based in Evanston, Illinois",
+        ],
+      },
+    ],
+  },
+  {
+    names: ["Privy"],
+    websiteHosts: ["privy.io", "www.privy.io"],
+    evidenceCandidates: [
+      {
+        url: "https://www.privy.io/terms",
+        title: "Privy Terms of Service",
+        sourceId: "company_website",
+        curatedPatch: {
+          legalName: "Horkos, Inc.",
+          incorporationCountry: "US",
+          incorporationState: "DE",
+        },
+        curatedRationale: [
+          "curated mapping: Crunchbase identifies Privy's legal entity as Horkos, Inc.",
+          "curated mapping: Privy was acquired by Stripe in 2025 for $1.1B",
+        ],
+      },
+    ],
+    registrySuggestions: [
+      {
+        label: "Delaware entity name search",
+        url: "https://icis.corp.delaware.gov/Ecorp/EntitySearch/NameSearch.aspx",
+        notes: "Search Horkos to find the Delaware corporate record.",
+        exactEntityName: "HORKOS, INC.",
+        purpose: "locate_entity",
+        authorityUrl: "https://corp.delaware.gov/directweb/",
+      },
+    ],
+  },
+  {
+    names: ["Bebop"],
+    websiteHosts: ["bebop.xyz"],
+    evidenceCandidates: [
+      {
+        url: "https://bebop.xyz/terms",
+        title: "Bebop Terms",
+        sourceId: "company_website",
+        curatedPatch: {},
+        curatedRationale: [
+          "curated mapping: Bebop is incubated by Wintermute, specific legal entity not publicly identified",
+        ],
+      },
+    ],
+  },
+  {
+    names: ["Arc", "Arc Network"],
+    websiteHosts: ["arc.network"],
+    evidenceCandidates: [
+      {
+        url: "https://www.arc.network/terms",
+        title: "Arc Network Terms",
+        sourceId: "company_website",
+        curatedPatch: {},
+        curatedRationale: [
+          "curated mapping: Arc is a Circle product (Circle Internet Group, Inc., Delaware). The Arc L1 is operated by Circle.",
+        ],
+      },
+    ],
+  },
 ];
 
 async function runOfacSearch(
