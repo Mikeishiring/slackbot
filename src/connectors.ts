@@ -2937,10 +2937,13 @@ function findGoodStandingIndicator(html: string): {
   const positivePatterns = [
     /\bcompany status\s*:?\s*active\b/,
     /\bentity status\s*:?\s*active\b/,
-    /\bstatus\s*:?\s*active\b/,
+    /\bstatus\s*[:\-·]\s*active\b/,
     /\bin good standing\b/,
     /\bgood standing\b/,
     /\bstatus\b[^.]{0,30}\bactive\b/,
+    /\bactive\s+(?:corporation|company|entity|llc|inc|ltd)\b/i,
+    /\bcurrent\s+(?:status|standing)\s*[:\-·]\s*active\b/i,
+    /\bregistration\s+status\s*[:\-·]\s*active\b/i,
   ];
   for (const pattern of positivePatterns) {
     const match = pattern.exec(text);
@@ -5197,9 +5200,9 @@ async function tryRegistryStatusSearch(
   const entityName = caseRecord.legalName;
 
   const queries = [
-    `"${entityName}" site:opencorporates.com`,
-    `"${entityName}" ${jurisdiction} entity status active`,
-    `"${entityName}" ${jurisdiction} corporation good standing registered`,
+    `"${entityName}" site:opencorporates.com OR site:lei.info OR site:dnb.com`,
+    `"${entityName}" ${jurisdiction} entity status active registered`,
+    `${entityName} ${jurisdiction} company status active good standing`,
   ];
 
   const allSnippets: Array<{ title: string; snippet: string; url: string }> = [];
@@ -5228,9 +5231,11 @@ async function tryRegistryStatusSearch(
   // Only trust the result if we found a clear signal from an authoritative source
   const authoritativeDomains = [
     "icis.corp.delaware.gov", "opencorporates.com", "sunbiz.org",
-    "sos.ca.gov", "sos.state.il.us", "ilsos.gov",
-    "sec.gov", "bloomberg.com", "dnb.com",
+    "sos.ca.gov", "sos.state.il.us", "ilsos.gov", "apps.ilsos.gov",
+    "sec.gov", "bloomberg.com", "dnb.com", "lei.info", "lei.report",
+    "globalfinreg.com", "gleif.org", "pitchbook.com", "crunchbase.com",
     "find-and-update.company-information.service.gov.uk",
+    "wyobiz.wyo.gov", "apps.dos.ny.gov", "bizfileonline.sos.ca.gov",
   ];
   const hasAuthoritativeSource = allSnippets.some(
     (s) => authoritativeDomains.some((domain) => s.url.includes(domain))
