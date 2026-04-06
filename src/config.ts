@@ -1,4 +1,4 @@
-export const DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-20250514";
+export const DEFAULT_ANTHROPIC_MODEL = "claude-opus-4-20250918";
 export const DEFAULT_ANTHROPIC_REQUEST_TIMEOUT_MS = 30_000;
 export const DEFAULT_ANTHROPIC_MAX_RETRIES = 2;
 export const DEFAULT_RUNTIME_MODE = "local";

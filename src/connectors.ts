@@ -1299,7 +1299,7 @@ export class ReputationSearchConnector implements StepConnector {
 
     // Auto-pass if: no real adverse after classification, OR very low adverse count
     // with no classifier available (likely noise for crypto companies)
-    const lowAdverseThreshold = context.adverseClassifier ? 0 : 3;
+    const lowAdverseThreshold = context.adverseClassifier ? 0 : 5;
     const canAutoPass = hasReliableResults && realAdverseCount <= lowAdverseThreshold;
 
     return {
@@ -5216,6 +5216,106 @@ function deriveIndustryQualifier(
   }
 
   return null;
+}
+
+async function tryOpenCorporatesDirectLookup(
+  entityName: string,
+  caseRecord: CaseSnapshot["caseRecord"],
+  context: ConnectorContext
+): Promise<StepExecutionResult | null> {
+  const searchUrl = `https://opencorporates.com/companies?q=${encodeURIComponent(entityName)}&utf8=%E2%9C%93`;
+  try {
+    const response = await fetch(searchUrl, {
+      headers: { "User-Agent": "PolicyBot/1.0" },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!response.ok) {
+      return null;
+    }
+
+    const html = await response.text();
+    const entityNameLower = entityName.toLowerCase().replace(/[.,]/g, "").trim();
+
+    // Look for the entity in search results with status
+    // OpenCorporates format: <a href="/companies/us_de/...">ENTITY NAME</a> ... <span>Active</span>
+    const statusEvidence = findGoodStandingIndicator(html);
+
+    // Verify the page actually mentions our entity (not just random results)
+    if (!html.toLowerCase().includes(entityNameLower.slice(0, 20))) {
+      return null;
+    }
+
+    if (!statusEvidence.positiveMatch && !statusEvidence.negativeMatch) {
+      return null;
+    }
+
+    const jurisdiction = describeRegistryJurisdiction(
+      caseRecord.incorporationCountry,
+      caseRecord.incorporationState
+    );
+
+    const artifact = await context.artifactStore.saveArtifact({
+      caseId: caseRecord.id,
+      stepKey: "good_standing",
+      title: "OpenCorporates Direct Lookup",
+      sourceId: "official_registry",
+      sourceUrl: searchUrl,
+      fileName: "opencorporates-lookup.html",
+      contentType: "text/html",
+      body: html,
+      category: "evidence",
+      metadata: { sourceUrl: searchUrl, searchMode: "opencorporates_direct" },
+    });
+    const evidenceIds = [artifact.id];
+
+    if (statusEvidence.negativeMatch) {
+      return {
+        status: "manual_review_required",
+        note: `OpenCorporates shows potential negative status for ${entityName}: ${statusEvidence.negativeMatch}. Manual verification required.`,
+        facts: [{
+          stepKey: "good_standing",
+          factKey: "good_standing_status",
+          summary: `OpenCorporates lookup found: ${statusEvidence.negativeMatch}.`,
+          value: { entityName, jurisdiction, negativeMatch: statusEvidence.negativeMatch, searchMode: "opencorporates_direct" },
+          verificationStatus: "inferred",
+          sourceId: "official_registry",
+          evidenceIds,
+          freshnessExpiresAt: addDays(new Date().toISOString(), 30),
+        }],
+        issues: [{
+          stepKey: "good_standing",
+          severity: "high",
+          title: "OpenCorporates indicates entity may not be active",
+          detail: `${entityName}: ${statusEvidence.negativeMatch}`,
+          evidenceIds,
+        }],
+        reviewTasks: [{
+          stepKey: "good_standing",
+          title: "Verify entity status from official registry",
+          instructions: `OpenCorporates indicated ${statusEvidence.negativeMatch}. Confirm with the official registry.`,
+        }],
+      };
+    }
+
+    return {
+      status: "passed",
+      note: `OpenCorporates confirms ${entityName} is ${statusEvidence.positiveMatch} in ${jurisdiction}. Auto-verified.`,
+      facts: [{
+        stepKey: "good_standing",
+        factKey: "good_standing_status",
+        summary: `OpenCorporates direct lookup confirmed: ${statusEvidence.positiveMatch}.`,
+        value: { entityName, jurisdiction, positiveMatch: statusEvidence.positiveMatch, searchMode: "opencorporates_direct", sourceUrl: searchUrl },
+        verificationStatus: "verified",
+        sourceId: "official_registry",
+        evidenceIds,
+        freshnessExpiresAt: addDays(new Date().toISOString(), 90),
+      }],
+      issues: [],
+      reviewTasks: [],
+    };
+  } catch {
+    return null;
+  }
 }
 
 async function tryRegistryStatusSearch(
