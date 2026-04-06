@@ -2784,10 +2784,23 @@ function readStringMetadata(
   return typeof value === "string" && value.trim() !== "" ? value : null;
 }
 
+const PDF_COLORS = {
+  primary: "#1a1a2e" as const,
+  accent: "#3B82F6" as const,
+  success: "#22c55e" as const,
+  danger: "#ef4444" as const,
+  warning: "#f59e0b" as const,
+  muted: "#6b7280" as const,
+  border: "#e5e7eb" as const,
+  surface: "#f9fafb" as const,
+  white: "#ffffff" as const,
+};
+
 async function renderPdf(markdown: string): Promise<Buffer> {
   const doc = new PDFDocument({
     size: "A4",
-    margin: 40,
+    margins: { top: 60, bottom: 60, left: 50, right: 50 },
+    bufferPages: true,
   });
   const stream = new PassThrough();
   const chunks: Buffer[] = [];
@@ -2797,34 +2810,146 @@ async function renderPdf(markdown: string): Promise<Buffer> {
   });
 
   const completion = new Promise<Buffer>((resolve, reject) => {
-    stream.on("end", () => {
-      resolve(Buffer.concat(chunks));
-    });
+    stream.on("end", () => resolve(Buffer.concat(chunks)));
     stream.on("error", reject);
   });
 
   doc.pipe(stream);
-  doc.fontSize(11);
+
+  const pageWidth = doc.page.width - 100;
+  let isFirstH1 = true;
+
   for (const line of markdown.split("\n")) {
-    if (line.startsWith("# ")) {
-      doc.moveDown(0.5);
-      doc.fontSize(18).text(line.slice(2));
-      doc.fontSize(11);
+    const trimmed = line.trim();
+
+    // Title (H1)
+    if (trimmed.startsWith("# ")) {
+      const title = trimmed.slice(2).trim();
+      if (isFirstH1) {
+        doc.moveDown(1);
+        doc.fillColor(PDF_COLORS.primary).fontSize(22).font("Helvetica-Bold").text(title, { align: "left" });
+        doc.moveDown(0.3);
+        doc.moveTo(50, doc.y).lineTo(50 + pageWidth, doc.y).lineWidth(2).strokeColor(PDF_COLORS.accent).stroke();
+        doc.moveDown(0.8);
+        isFirstH1 = false;
+      } else {
+        doc.addPage();
+        doc.fillColor(PDF_COLORS.primary).fontSize(22).font("Helvetica-Bold").text(title, { align: "left" });
+        doc.moveDown(0.3);
+        doc.moveTo(50, doc.y).lineTo(50 + pageWidth, doc.y).lineWidth(2).strokeColor(PDF_COLORS.accent).stroke();
+        doc.moveDown(0.8);
+      }
       continue;
     }
 
-    if (line.startsWith("## ")) {
-      doc.moveDown(0.5);
-      doc.fontSize(14).text(line.slice(3));
-      doc.fontSize(11);
+    // Section header (H2)
+    if (trimmed.startsWith("## ")) {
+      const sectionTitle = trimmed.slice(3).trim();
+      if (doc.y > doc.page.height - 120) {
+        doc.addPage();
+      }
+      doc.moveDown(0.6);
+      const sectionY = doc.y;
+      doc.rect(50, sectionY, 3, 16).fill(PDF_COLORS.accent);
+      doc.fillColor(PDF_COLORS.primary).fontSize(13).font("Helvetica-Bold").text(sectionTitle, 58, sectionY + 1);
+      doc.moveDown(0.4);
+      doc.moveTo(50, doc.y).lineTo(50 + pageWidth, doc.y).lineWidth(0.5).strokeColor(PDF_COLORS.border).stroke();
+      doc.moveDown(0.4);
       continue;
     }
 
-    doc.text(line);
+    // Subsection header (H3)
+    if (trimmed.startsWith("### ")) {
+      doc.moveDown(0.3);
+      doc.fillColor(PDF_COLORS.accent).fontSize(11).font("Helvetica-Bold").text(trimmed.slice(4).trim());
+      doc.moveDown(0.2);
+      continue;
+    }
+
+    // Empty line
+    if (trimmed === "") {
+      doc.moveDown(0.2);
+      continue;
+    }
+
+    // Status-colored bullet points
+    if (trimmed.startsWith("- ")) {
+      const content = trimmed.slice(2).trim();
+      const color = getLineStatusColor(content);
+
+      if (doc.y > doc.page.height - 80) {
+        doc.addPage();
+      }
+
+      doc.fillColor(color).fontSize(9).font("Helvetica").text(content, 58, doc.y, {
+        width: pageWidth - 8,
+        lineGap: 2,
+      });
+      doc.moveDown(0.1);
+      continue;
+    }
+
+    // Numbered items
+    if (/^\d+\.\s/.test(trimmed)) {
+      if (doc.y > doc.page.height - 80) {
+        doc.addPage();
+      }
+      doc.fillColor(PDF_COLORS.primary).fontSize(9).font("Helvetica").text(trimmed, 55, doc.y, {
+        width: pageWidth - 5,
+        lineGap: 2,
+      });
+      doc.moveDown(0.1);
+      continue;
+    }
+
+    // Regular text
+    if (doc.y > doc.page.height - 80) {
+      doc.addPage();
+    }
+    doc.fillColor(PDF_COLORS.primary).fontSize(9).font("Helvetica").text(trimmed, {
+      width: pageWidth,
+      lineGap: 2,
+    });
   }
-  doc.end();
 
+  // Add page numbers and footer
+  const pages = doc.bufferedPageRange();
+  const generatedAt = new Date().toISOString().split("T")[0] ?? "";
+  for (let i = 0; i < pages.count; i++) {
+    doc.switchToPage(i);
+    // Header line
+    doc.save();
+    doc.moveTo(50, 45).lineTo(50 + pageWidth, 45).lineWidth(0.5).strokeColor(PDF_COLORS.border).stroke();
+    doc.fillColor(PDF_COLORS.muted).fontSize(7).font("Helvetica")
+      .text("COUNTERPARTY VETTING REPORT", 50, 35, { align: "left" })
+      .text(`CONFIDENTIAL`, 50, 35, { align: "right", width: pageWidth });
+    // Footer
+    doc.moveTo(50, doc.page.height - 50).lineTo(50 + pageWidth, doc.page.height - 50).lineWidth(0.5).strokeColor(PDF_COLORS.border).stroke();
+    doc.fillColor(PDF_COLORS.muted).fontSize(7).font("Helvetica")
+      .text(`Generated ${generatedAt}`, 50, doc.page.height - 45, { align: "left" })
+      .text(`Page ${i + 1} of ${pages.count}`, 50, doc.page.height - 45, { align: "right", width: pageWidth });
+    doc.restore();
+  }
+
+  doc.end();
   return completion;
+}
+
+function getLineStatusColor(content: string): string {
+  const lower = content.toLowerCase();
+  if (lower.includes("passed") || lower.includes("active") || lower.includes("good standing") || lower.includes("clear")) {
+    return PDF_COLORS.success;
+  }
+  if (lower.includes("failed") || lower.includes("terminated") || lower.includes("rejected") || lower.includes("inactive")) {
+    return PDF_COLORS.danger;
+  }
+  if (lower.includes("manual") || lower.includes("review") || lower.includes("pending") || lower.includes("blocked") || lower.includes("warning")) {
+    return PDF_COLORS.warning;
+  }
+  if (lower.startsWith("none")) {
+    return PDF_COLORS.muted;
+  }
+  return PDF_COLORS.primary;
 }
 
 function defaultUserAgent(): string {
