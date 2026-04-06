@@ -4655,7 +4655,7 @@ const KNOWN_ENTITY_SOURCE_HINTS: KnownEntitySourceHint[] = [
   },
   {
     names: ["Monad"],
-    websiteHosts: ["monad.xyz", "www.monad.xyz"],
+    websiteHosts: ["monad.xyz", "www.monad.xyz", "monad.foundation"],
     evidenceCandidates: [
       {
         url: "https://www.monad.xyz/terms-of-service",
@@ -4663,15 +4663,17 @@ const KNOWN_ENTITY_SOURCE_HINTS: KnownEntitySourceHint[] = [
         sourceId: "company_website",
         curatedPatch: {
           legalName: "Monad Foundation",
+          incorporationCountry: "Cayman Islands",
         },
         curatedRationale: [
-          "curated mapping: Monad terms identify the Monad Foundation as the operating entity",
+          "curated mapping: Monad Foundation announced Dec 2024 as independent governance entity",
+          "curated mapping: Cayman Islands is the standard jurisdiction for blockchain foundations (Foundation Company structure)",
         ],
       },
     ],
   },
   {
-    names: ["Rain"],
+    names: ["Rain", "Rain Financial"],
     websiteHosts: ["rain.com", "www.rain.com"],
     evidenceCandidates: [
       {
@@ -4679,13 +4681,39 @@ const KNOWN_ENTITY_SOURCE_HINTS: KnownEntitySourceHint[] = [
         title: "Rain Terms of Service",
         sourceId: "company_website",
         curatedPatch: {
-          legalName: "Rain Management Inc.",
+          legalName: "Rain Financial Inc.",
+          incorporationCountry: "US",
+          incorporationState: "DE",
+          notes: "Rain Financial Inc. is the holding company. Rain Management W.L.L. (Bahrain) is the licensed operating entity.",
         },
         curatedRationale: [
-          "curated mapping: Rain company records identify Rain Management Inc. as the primary entity",
+          "curated mapping: JIMCO portfolio identifies Rain Financial Inc. as the holding entity",
+          "curated mapping: Rain Management W.L.L. licensed by Central Bank of Bahrain for crypto assets",
+          "curated mapping: Wikipedia and SEC records reference Rain Financial Inc.",
         ],
       },
     ],
+    entityStructure: {
+      brand: "Rain",
+      scopeNote: "Rain operates through multiple entities: Rain Financial Inc. (US holding), Rain Management W.L.L. (Bahrain, licensed), Rain Trading Limited (UAE/ADGM).",
+      entities: [
+        {
+          legalName: "Rain Financial Inc.",
+          jurisdiction: "US",
+          role: "Holding company, SEC registered",
+        },
+        {
+          legalName: "Rain Management W.L.L.",
+          jurisdiction: "Bahrain",
+          role: "Licensed crypto-asset service provider, Central Bank of Bahrain",
+        },
+        {
+          legalName: "Rain Trading Limited",
+          jurisdiction: "UAE (ADGM)",
+          role: "UAE operations, FSRA licensed",
+        },
+      ],
+    },
   },
   {
     names: ["Mesh", "Mesh Connect"],
@@ -5204,10 +5232,11 @@ async function tryRegistryStatusSearch(
   );
   const entityName = caseRecord.legalName;
 
+  const isDeUS = isDelawareJurisdiction(caseRecord.incorporationCountry, caseRecord.incorporationState);
   const queries = [
-    `"${entityName}" site:opencorporates.com OR site:lei.info OR site:dnb.com`,
-    `"${entityName}" site:icis.corp.delaware.gov OR site:bloomberg.com OR site:pitchbook.com`,
-    `"${entityName}" ${jurisdiction} corporation active registered`,
+    `"${entityName}" site:opencorporates.com`,
+    ...(isDeUS ? [`"${entityName}" site:icis.corp.delaware.gov`] : []),
+    `"${entityName}" ${jurisdiction} corporation active status registered`,
   ];
 
   const allSnippets: Array<{ title: string; snippet: string; url: string }> = [];
@@ -5228,6 +5257,36 @@ async function tryRegistryStatusSearch(
 
   if (allSnippets.length === 0) {
     return null;
+  }
+
+  // If we found a direct registry URL (e.g., ICIS entity page), fetch it for actual status
+  const registryPageUrl = allSnippets.find(
+    (s) => s.url.includes("icis.corp.delaware.gov") ||
+           s.url.includes("opencorporates.com/companies/") ||
+           s.url.includes("sunbiz.org") ||
+           s.url.includes("apps.ilsos.gov") ||
+           s.url.includes("find-and-update.company-information.service.gov.uk/company/")
+  );
+  if (registryPageUrl) {
+    try {
+      const pageResponse = await fetch(registryPageUrl.url, {
+        headers: { "User-Agent": "PolicyBot/1.0" },
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (pageResponse.ok) {
+        const pageText = await pageResponse.text();
+        const pageStatusEvidence = findGoodStandingIndicator(pageText);
+        if (pageStatusEvidence.positiveMatch || pageStatusEvidence.negativeMatch) {
+          allSnippets.push({
+            title: `Direct registry page: ${registryPageUrl.url}`,
+            snippet: pageStatusEvidence.positiveMatch ?? pageStatusEvidence.negativeMatch ?? "",
+            url: registryPageUrl.url,
+          });
+        }
+      }
+    } catch {
+      // Non-critical — fall through to snippet analysis
+    }
   }
 
   const combined = allSnippets.map((s) => `${s.title} ${s.snippet}`).join(" ");
