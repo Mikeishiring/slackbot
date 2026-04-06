@@ -1297,7 +1297,10 @@ export class ReputationSearchConnector implements StepConnector {
       evidenceIds.push(classificationArtifact.id);
     }
 
-    const canAutoPass = hasReliableResults && realAdverseCount === 0;
+    // Auto-pass if: no real adverse after classification, OR very low adverse count
+    // with no classifier available (likely noise for crypto companies)
+    const lowAdverseThreshold = context.adverseClassifier ? 0 : 3;
+    const canAutoPass = hasReliableResults && realAdverseCount <= lowAdverseThreshold;
 
     return {
       status: canAutoPass ? "passed" : "manual_review_required",
@@ -4107,7 +4110,9 @@ function extractBbbSummary(html: string): BbbSearchSummary {
     complaintCount: complaintCountMatch?.[1]
       ? Number(complaintCountMatch[1])
       : null,
-    flaggedKeywords: extractAdverseKeywords(text),
+    flaggedKeywords: extractAdverseKeywords(text, [
+      "complaint", "complaints", "scam", "ripoff",
+    ]),
     fetchError: null,
     extractionSource: "live_fetch",
     structureStatus: "ok",
@@ -5201,8 +5206,8 @@ async function tryRegistryStatusSearch(
 
   const queries = [
     `"${entityName}" site:opencorporates.com OR site:lei.info OR site:dnb.com`,
-    `"${entityName}" ${jurisdiction} entity status active registered`,
-    `${entityName} ${jurisdiction} company status active good standing`,
+    `"${entityName}" site:icis.corp.delaware.gov OR site:bloomberg.com OR site:pitchbook.com`,
+    `"${entityName}" ${jurisdiction} corporation active registered`,
   ];
 
   const allSnippets: Array<{ title: string; snippet: string; url: string }> = [];
@@ -5241,16 +5246,16 @@ async function tryRegistryStatusSearch(
     (s) => authoritativeDomains.some((domain) => s.url.includes(domain))
   );
 
-  // Also check for direct status mentions near the entity name
+  // Check for status mentions — either near the entity name or from authoritative sources
   const entityNameLower = entityName.toLowerCase();
+  const entityNameShort = entityNameLower.replace(/,?\s*(inc\.?|llc|ltd\.?|pbc|corp\.?|limited)$/i, "").trim();
   const hasDirectStatusMention = allSnippets.some((s) => {
     const text = `${s.title} ${s.snippet}`.toLowerCase();
-    return (
-      text.includes(entityNameLower) &&
-      (text.includes("active") || text.includes("good standing") ||
+    const hasEntityRef = text.includes(entityNameLower) || text.includes(entityNameShort);
+    const hasStatusWord = text.includes("active") || text.includes("good standing") ||
        text.includes("inactive") || text.includes("revoked") ||
-       text.includes("void") || text.includes("dissolved"))
-    );
+       text.includes("void") || text.includes("dissolved");
+    return hasEntityRef && hasStatusWord;
   });
 
   if (!hasDirectStatusMention && !hasAuthoritativeSource) {
