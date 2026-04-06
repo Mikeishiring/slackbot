@@ -1,6 +1,7 @@
 import type { Tool } from "@anthropic-ai/sdk/resources/messages.js";
 
 import type { PolicyBotRuntime } from "./runtime.js";
+import type { SlackBotHandle } from "./slack.js";
 import type { CreateCaseInput, ReviewOutcome, WorkflowStepKey } from "./types.js";
 import { asNullableString, parseJson } from "./utils.js";
 
@@ -10,6 +11,7 @@ export interface ToolContext {
   threadTs: string;
   actorId: string | null;
   reviewerUserIds: string[] | null;
+  slackBot: SlackBotHandle | null;
 }
 
 const DEFAULT_LIMIT = 10;
@@ -658,6 +660,20 @@ const TOOL_DEFINITIONS: Tool[] = [
     },
   },
   {
+    name: "share_report",
+    description:
+      "Upload the case's PDF report and a formatted summary to the current Slack thread. Use after screening completes or when the user asks for the report.",
+    input_schema: {
+      type: "object",
+      properties: {
+        case_id: {
+          type: "string",
+          description: "The case ID. Omit to use the current thread's linked case.",
+        },
+      },
+    },
+  },
+  {
     name: "search_cases",
     description:
       "Search existing cases by counterparty name. Useful for checking if a company has already been screened.",
@@ -891,6 +907,35 @@ export function createToolRunner(
           message: `Case exported.`,
           case_id: result.caseId,
           bundle_directory: result.bundleDirectory,
+        };
+      }
+      case "share_report": {
+        const caseId = resolveCase(input.case_id, context);
+        const snapshot = runtime.workflow.getCaseSnapshot(caseId);
+        const pdfReport = snapshot.reports.find(
+          (report) => report.kind === "final" && report.isCurrent && report.artifactId
+        );
+        if (!pdfReport?.artifactId) {
+          return { message: "No PDF report available yet. The workflow may still be running." };
+        }
+        const pdfArtifact = snapshot.artifacts.find((a) => a.id === pdfReport.artifactId);
+        if (!pdfArtifact || !context.slackBot) {
+          return { message: "PDF report exists but cannot be shared to Slack from this context." };
+        }
+        const { readFileSync } = await import("node:fs");
+        const pdfBuffer = readFileSync(runtime.artifactStore.resolveAbsolutePath(pdfArtifact));
+        const filename = `${snapshot.caseRecord.displayName.replace(/[^a-zA-Z0-9]/g, "-")}-vetting-report.pdf`;
+        await context.slackBot.uploadFile(
+          context.channelId,
+          context.threadTs,
+          Buffer.from(pdfBuffer),
+          filename,
+          `Vetting Report: ${snapshot.caseRecord.displayName}`
+        );
+        return {
+          message: `PDF report uploaded to this thread.`,
+          case_id: snapshot.caseRecord.id,
+          report_version: pdfReport.versionNumber,
         };
       }
       case "search_cases": {
@@ -2036,6 +2081,7 @@ export function createToolRuntime(runtime: PolicyBotRuntime): {
     threadTs: "",
     actorId: null,
     reviewerUserIds: null,
+    slackBot: null,
   };
   return {
     tools: getToolDefinitions(),

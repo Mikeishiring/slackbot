@@ -67,6 +67,8 @@ export async function main(
     throw error;
   }
 
+  runtime.slackBot = bot;
+
   runtime.setNotifier(async (caseId, stepKey, status, summary) => {
     let caseRecord;
     try {
@@ -81,12 +83,12 @@ export async function main(
     const stepLabel = stepKey.replace(/_/g, " ");
     const truncatedSummary = summary.length > 120 ? `${summary.slice(0, 117)}...` : summary;
     const line =
-      status === "passed" ? `*${stepLabel}* passed`
-        : status === "failed" ? `*${stepLabel}* failed${truncatedSummary ? ` -- ${truncatedSummary}` : ""}`
-        : status === "manual_review_required" ? `*${stepLabel}* needs review${truncatedSummary ? ` -- ${truncatedSummary}` : ""}`
-        : status === "blocked" ? `*${stepLabel}* blocked${truncatedSummary ? ` -- ${truncatedSummary}` : ""}`
-        : status === "skipped" ? `*${stepLabel}* skipped`
-        : `*${stepLabel}* ${status}`;
+      status === "passed" ? `:white_check_mark: *${stepLabel}*`
+        : status === "failed" ? `:x: *${stepLabel}* -- ${truncatedSummary || "failed"}`
+        : status === "manual_review_required" ? `:eyes: *${stepLabel}* -- ${truncatedSummary || "needs review"}`
+        : status === "blocked" ? `:no_entry: *${stepLabel}* -- ${truncatedSummary || "blocked"}`
+        : status === "skipped" ? `:fast_forward: *${stepLabel}*`
+        : `:hourglass_flowing_sand: *${stepLabel}* ${status}`;
 
     await bot.postMessage(
       caseRecord.slackChannelId,

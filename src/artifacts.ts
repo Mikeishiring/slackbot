@@ -620,18 +620,67 @@ export function renderCaseReportMarkdown(
     caseMetadata.push(`- Decision Summary: ${snapshot.caseRecord.decisionSummary}`);
   }
 
+  const passedCount = snapshot.steps.filter((s) => s.status === "passed" || s.status === "skipped").length;
+  const totalSteps = snapshot.steps.length;
+  const stepSummaryLines = snapshot.steps.map((step) => {
+    const icon = step.status === "passed" ? "[PASSED]"
+      : step.status === "skipped" ? "[SKIPPED]"
+      : step.status === "failed" ? "[FAILED]"
+      : step.status === "blocked" ? "[BLOCKED]"
+      : step.status === "manual_review_required" ? "[REVIEW NEEDED]"
+      : `[${step.status.toUpperCase()}]`;
+    const label = step.stepKey.replace(/_/g, " ");
+    return `- ${icon} ${label}${step.note ? ` -- ${step.note.slice(0, 80)}` : ""}`;
+  });
+
   const sections = [
     `# Counterparty Vetting Report`,
     ``,
-    `## Case Metadata`,
+    `## Executive Summary`,
+    `- Counterparty: ${snapshot.caseRecord.displayName}`,
+    `- Legal Entity: ${snapshot.caseRecord.legalName ?? "Unknown"}`,
+    `- Type: ${snapshot.caseRecord.counterpartyKind}`,
+    `- Jurisdiction: ${formatJurisdiction(snapshot)}`,
+    `- Status: ${snapshot.caseRecord.caseStatus.toUpperCase()}`,
+    `- Recommendation: ${snapshot.caseRecord.recommendation.toUpperCase()}`,
+    snapshot.caseRecord.decisionSummary ? `- Decision: ${snapshot.caseRecord.decisionSummary}` : "",
+    `- Automated checks passed: ${passedCount}/${totalSteps}`,
+    `- Open review tasks: ${manualReviewItems.length}`,
+    `- Open issues: ${openIssues.length}`,
+    ``,
+    `## Screening Progress`,
+    ...stepSummaryLines,
+    ``,
+    ...(manualReviewItems.length > 0 ? [
+      `## Action Required`,
+      `The following items require manual review before this case can be finalized:`,
+      ``,
+      ...manualReviewItems.map((task) => {
+        const stepLabel = task.stepKey.replace(/_/g, " ");
+        return [
+          `### ${stepLabel}: ${task.title}`,
+          `- ${task.instructions}`,
+          ``,
+        ].join("\n");
+      }),
+    ] : [
+      `## Action Required`,
+      `- No manual review items remain. This case is ready for finalization.`,
+      ``,
+    ]),
+    ...(openIssues.length > 0 ? [
+      `## Open Issues`,
+      ...openIssues.map((issue) => `- [${issue.severity.toUpperCase()}] ${issue.stepKey.replace(/_/g, " ")}: ${issue.title}${issue.detail ? ` -- ${issue.detail.slice(0, 100)}` : ""}`),
+      ``,
+    ] : []),
+    `## Case Details`,
     caseMetadata.join("\n"),
     ``,
-    `## Known Entity Structure`,
-    renderKnownEntityStructureSection(knownEntityStructure),
-    ``,
-    `## Traceability Summary`,
-    renderTraceabilitySummary(snapshot, artifactStore),
-    ``,
+    ...(knownEntityStructure ? [
+      `## Entity Structure`,
+      renderKnownEntityStructureSection(knownEntityStructure),
+      ``,
+    ] : []),
     `## Verified Facts`,
     verifiedFacts.length === 0
       ? `- None`
@@ -642,39 +691,19 @@ export function renderCaseReportMarkdown(
       ? `- None`
       : renderFactList(inferredFacts, snapshot, artifactStore),
     ``,
-    `## Unsupported Findings`,
-    unsupportedFacts.length === 0
-      ? `- None`
-      : renderFactList(unsupportedFacts, snapshot, artifactStore),
-    ``,
+    ...(unsupportedFacts.length > 0 ? [
+      `## Unsupported Findings`,
+      renderFactList(unsupportedFacts, snapshot, artifactStore),
+      ``,
+    ] : []),
     `## Source Index`,
     renderSourceIndex(snapshot, artifactStore),
     ``,
-    `## Open Issues`,
-    openIssues.length === 0
-      ? `- None`
-      : renderIssueList(openIssues, snapshot, artifactStore),
-    ``,
-    `## Blocked Checks`,
-    blockedChecks.length === 0
-      ? `- None`
-      : blockedChecks
-          .map(
-            (step) =>
-              `- ${step.stepKey}: ${step.note ?? "Step did not complete successfully"}`
-          )
-          .join("\n"),
-    ``,
-    `## Manual Review Items`,
-    manualReviewItems.length === 0
-      ? `- None`
-      : manualReviewItems
-          .map(
-            (task) =>
-              `- ${task.id}: ${task.title} [${task.stepKey}] ${task.instructions}`
-          )
-          .join("\n"),
-    ``,
+    ...(blockedChecks.length > 0 ? [
+      `## Blocked Checks`,
+      ...blockedChecks.map((step) => `- ${step.stepKey}: ${step.note ?? "Step did not complete successfully"}`),
+      ``,
+    ] : []),
     `## Resolved Review Decisions`,
     resolvedReviewItems.length === 0
       ? `- None`

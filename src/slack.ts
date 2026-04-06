@@ -118,6 +118,7 @@ export type SlackSay = (message: {
 
 export interface SlackBotHandle {
   postMessage: (channel: string, threadTs: string, text: string) => Promise<void>;
+  uploadFile: (channel: string, threadTs: string, file: Buffer, filename: string, title: string) => Promise<void>;
 }
 
 export async function startSlackBot(config: SlackConfig): Promise<SlackBotHandle> {
@@ -202,6 +203,19 @@ export async function startSlackBot(config: SlackConfig): Promise<SlackBotHandle
         });
       } catch {
         // Non-critical notification failure.
+      }
+    },
+    uploadFile: async (channel, threadTs, file, filename, title) => {
+      try {
+        await app.client.filesUploadV2({
+          channel_id: channel,
+          thread_ts: threadTs,
+          file,
+          filename,
+          title,
+        });
+      } catch {
+        // Non-critical upload failure.
       }
     },
   };

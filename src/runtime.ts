@@ -57,6 +57,7 @@ export class PolicyBotRuntime {
   public readonly captureService: PlaywrightCaptureService | null;
   public readonly workflow: PolicyWorkflow;
   public readonly exporter: LocalCaseExporter;
+  public slackBot: import("./slack.js").SlackBotHandle | null = null;
 
   public constructor(
     private readonly config: AppConfig,
@@ -147,6 +148,7 @@ export class PolicyBotRuntime {
       threadTs: request.threadTs,
       actorId: request.actorId,
       reviewerUserIds: this.config.reviewerUserIds ?? null,
+      slackBot: this.slackBot ?? null,
     };
 
     let response: string;

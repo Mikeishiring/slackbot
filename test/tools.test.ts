@@ -707,6 +707,7 @@ test("action tools: create_case, get_case via thread context, resolve_review, fi
     threadTs: "1000.000",
     actorId: "U_TESTER",
     reviewerUserIds: null,
+    slackBot: null,
   };
 
   try {
@@ -827,6 +828,7 @@ test("action tools: rerun_step clears and requeues a step", async () => {
       threadTs: "2000.000",
       actorId: "U_TESTER",
       reviewerUserIds: null,
+      slackBot: null,
     };
     const runTool = createToolRunner(runtime, context);
 
@@ -874,6 +876,7 @@ test("action tools: resolve_case_id falls back to thread context", async () => {
       channelId: "C_TEST",
       threadTs: "3000.000",
       reviewerUserIds: null,
+      slackBot: null,
       actorId: "U_TESTER",
     };
     const runTool = createToolRunner(runtime, noContext);
@@ -941,6 +944,7 @@ test("action tools: access control blocks non-reviewers from finalize and resolv
       threadTs: "4000.000",
       actorId: "U_RANDOM",
       reviewerUserIds: ["U_REVIEWER"],
+      slackBot: null,
     };
     const runTool = createToolRunner(runtime, restricted);
 
@@ -977,6 +981,7 @@ test("action tools: access control blocks non-reviewers from finalize and resolv
       threadTs: "4000.000",
       actorId: "U_REVIEWER",
       reviewerUserIds: ["U_REVIEWER"],
+      slackBot: null,
     };
     const reviewerTool = createToolRunner(runtime, allowed);
     const result = (await reviewerTool("finalize_case", {
@@ -1038,6 +1043,7 @@ test("action tools: search_cases finds by name and empty query returns nothing",
       threadTs: "5000.000",
       actorId: "U_TESTER",
       reviewerUserIds: null,
+      slackBot: null,
     };
     const runTool = createToolRunner(runtime, context);
 
@@ -1095,6 +1101,7 @@ test("action tools: create_case returns duplicate_warning for active cases with 
       threadTs: "6000.000",
       actorId: "U_TESTER",
       reviewerUserIds: null,
+      slackBot: null,
     };
     const runTool = createToolRunner(runtime, context);
 
@@ -1113,6 +1120,7 @@ test("action tools: create_case returns duplicate_warning for active cases with 
       threadTs: "6001.000",
       actorId: "U_TESTER",
       reviewerUserIds: null,
+      slackBot: null,
     };
     const runTool2 = createToolRunner(runtime, context2);
     const second = (await runTool2("create_case", {
