@@ -738,6 +738,9 @@ export function createToolRunner(
             status: step.status,
             hard_gate: step.hardGate,
             note: step.note,
+            sources: snapshot.artifacts
+              .filter((a) => a.stepKey === step.stepKey && a.sourceUrl)
+              .map((a) => ({ title: a.title, url: a.sourceUrl })),
           })),
           open_review_tasks: snapshot.reviewTasks
             .filter((task) => task.status === "open")

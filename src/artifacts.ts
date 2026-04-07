@@ -2943,14 +2943,35 @@ async function renderPdf(markdown: string): Promise<Buffer> {
       continue;
     }
 
-    // Regular text
+    // Regular text (with markdown link support)
     if (doc.y > doc.page.height - 80) {
       doc.addPage();
     }
-    doc.fillColor(PDF_COLORS.primary).fontSize(9).font("Helvetica").text(trimmed, {
-      width: pageWidth,
-      lineGap: 2,
-    });
+    const mdLinkPattern = /\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g;
+    if (mdLinkPattern.test(trimmed)) {
+      mdLinkPattern.lastIndex = 0;
+      let lastIndex = 0;
+      let match: RegExpExecArray | null;
+      while ((match = mdLinkPattern.exec(trimmed)) !== null) {
+        const before = trimmed.slice(lastIndex, match.index);
+        if (before) {
+          doc.fillColor(PDF_COLORS.primary).fontSize(9).font("Helvetica").text(before, { continued: true });
+        }
+        doc.fillColor(PDF_COLORS.accent).fontSize(9).font("Helvetica").text(match[1] ?? "", {
+          link: match[2],
+          underline: true,
+          continued: true,
+        });
+        lastIndex = match.index + match[0].length;
+      }
+      const remaining = trimmed.slice(lastIndex);
+      doc.fillColor(PDF_COLORS.primary).fontSize(9).font("Helvetica").text(remaining, { lineGap: 2 });
+    } else {
+      doc.fillColor(PDF_COLORS.primary).fontSize(9).font("Helvetica").text(trimmed, {
+        width: pageWidth,
+        lineGap: 2,
+      });
+    }
   }
 
   // Add page numbers and footer

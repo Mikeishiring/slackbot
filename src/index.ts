@@ -82,10 +82,20 @@ export async function main(
 
     const stepLabel = stepKey.replace(/_/g, " ");
     const truncatedSummary = summary.length > 120 ? `${summary.slice(0, 117)}...` : summary;
+
+    let sourceLink = "";
+    try {
+      const stepArtifacts = runtime.storage.listArtifactsForStep(caseId, stepKey);
+      const withUrl = stepArtifacts.find((a) => a.sourceUrl);
+      if (withUrl?.sourceUrl) {
+        sourceLink = ` (<${withUrl.sourceUrl}|view source>)`;
+      }
+    } catch { /* non-critical */ }
+
     const line =
-      status === "passed" ? `:white_check_mark: *${stepLabel}*`
-        : status === "failed" ? `:x: *${stepLabel}* -- ${truncatedSummary || "failed"}`
-        : status === "manual_review_required" ? `:eyes: *${stepLabel}* -- ${truncatedSummary || "needs review"}`
+      status === "passed" ? `:white_check_mark: *${stepLabel}*${sourceLink}`
+        : status === "failed" ? `:x: *${stepLabel}* -- ${truncatedSummary || "failed"}${sourceLink}`
+        : status === "manual_review_required" ? `:eyes: *${stepLabel}* -- ${truncatedSummary || "needs review"}${sourceLink}`
         : status === "blocked" ? `:no_entry: *${stepLabel}* -- ${truncatedSummary || "blocked"}`
         : status === "skipped" ? `:fast_forward: *${stepLabel}*`
         : `:hourglass_flowing_sand: *${stepLabel}* ${status}`;
