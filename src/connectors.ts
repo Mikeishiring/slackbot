@@ -3289,6 +3289,358 @@ function buildOfficialRegistrySuggestions(
           notes: "Use the legal name to search the Wyoming SOS business database.",
         },
       ];
+    case "AL":
+      return [
+        {
+          label: "Alabama Secretary of State business search",
+          url: "http://arc-sos.state.al.us/CGI/CORPNAME.MBR/INPUT",
+          notes: "Use the legal name to search the Alabama SOS corporate database.",
+        },
+      ];
+    case "AK":
+      return [
+        {
+          label: "Alaska Division of Corporations business search",
+          url: "https://www.commerce.alaska.gov/web/cbpl/Corporations.aspx",
+          notes: "Use the legal name to search the Alaska CBPL corporations database.",
+        },
+      ];
+    case "AZ":
+      return [
+        {
+          label: "Arizona Corporation Commission entity search",
+          url: "http://starpas.azcc.gov/scripts/cgiip.exe/WService=wsbroker1/main.p",
+          notes: "Use the legal name to search the Arizona Corporation Commission database.",
+        },
+      ];
+    case "AR":
+      return [
+        {
+          label: "Arkansas Secretary of State business search",
+          url: "http://www.sosweb.state.ar.us/corps/index.html",
+          notes: "Use the legal name to search the Arkansas SOS corporate database.",
+        },
+      ];
+    case "CO":
+      return [
+        {
+          label: "Colorado Secretary of State business search",
+          url: "http://www.sos.state.co.us/biz/BusinessEntityCriteriaExt.do",
+          notes: "Use the legal name to search the Colorado SOS business entity database.",
+        },
+      ];
+    case "CT":
+      return [
+        {
+          label: "Connecticut Secretary of State business search",
+          url: "http://www.concord-sots.ct.gov/CONCORD/online?sn=InquiryServlet&eid=99",
+          notes: "Use the legal name to search the Connecticut SOTS CONCORD database.",
+        },
+      ];
+    case "DC":
+      return [
+        {
+          label: "District of Columbia business search",
+          url: "https://business.dc.gov/research_business_info",
+          notes: "Use the legal name to search the DC business registry.",
+        },
+      ];
+    case "GA":
+      return [
+        {
+          label: "Georgia Secretary of State business search",
+          url: "https://ecorp.sos.ga.gov/BusinessSearch",
+          notes: "Use the legal name to search the Georgia SOS business database.",
+        },
+      ];
+    case "HI":
+      return [
+        {
+          label: "Hawaii business entity search",
+          url: "http://hbe.ehawaii.gov/documents/search.html",
+          notes: "Use the legal name to search the Hawaii business entity database.",
+        },
+      ];
+    case "ID":
+      return [
+        {
+          label: "Idaho Secretary of State business search",
+          url: "http://www.accessidaho.org/public/sos/corp/search.html",
+          notes: "Use the legal name to search the Idaho SOS corporate database.",
+        },
+      ];
+    case "IN":
+      return [
+        {
+          label: "Indiana Secretary of State business search",
+          url: "https://secure.in.gov/sos/bus_service/online_corps/name_search.aspx",
+          notes: "Use the legal name to search the Indiana SOS business database.",
+        },
+      ];
+    case "IA":
+      return [
+        {
+          label: "Iowa Secretary of State business search",
+          url: "http://www.sos.state.ia.us/search/index.html",
+          notes: "Use the legal name to search the Iowa SOS business database.",
+        },
+      ];
+    case "KS":
+      return [
+        {
+          label: "Kansas Secretary of State business search",
+          url: "http://www.accesskansas.org/srv-corporations/index.do",
+          notes: "Use the legal name to search the Kansas SOS corporate database.",
+        },
+      ];
+    case "KY":
+      return [
+        {
+          label: "Kentucky Secretary of State business search",
+          url: "http://www.sos.ky.gov/Pages/default.aspx",
+          notes: "Use the legal name to search the Kentucky SOS business database.",
+        },
+      ];
+    case "LA":
+      return [
+        {
+          label: "Louisiana Secretary of State business search",
+          url: "https://coraweb.sos.la.gov/CommercialSearch/CommercialSearch.aspx",
+          notes: "Use the legal name to search the Louisiana SOS commercial database.",
+        },
+      ];
+    case "ME":
+      return [
+        {
+          label: "Maine Secretary of State business search",
+          url: "https://icrs.informe.org/nei-sos-icrs/ICRS?MainPage=x",
+          notes: "Use the legal name to search the Maine SOS corporate database.",
+        },
+      ];
+    case "MD":
+      return [
+        {
+          label: "Maryland business entity search",
+          url: "http://sdat.dat.maryland.gov/ucc-charter/Pages/CharterSearch/default.aspx",
+          notes: "Use the legal name to search the Maryland SDAT charter database.",
+        },
+      ];
+    case "MA":
+      return [
+        {
+          label: "Massachusetts Secretary of State business search",
+          url: "http://corp.sec.state.ma.us/corp/corpsearch/corpsearchinput.asp",
+          notes: "Use the legal name to search the Massachusetts SOS corporate database.",
+        },
+      ];
+    case "MI":
+      return [
+        {
+          label: "Michigan business entity search",
+          url: "http://www.dleg.state.mi.us/bcs_corp/sr_corp.asp",
+          notes: "Use the legal name to search the Michigan LARA business entity database.",
+        },
+      ];
+    case "MN":
+      return [
+        {
+          label: "Minnesota Secretary of State business search",
+          url: "https://mblsportal.sos.state.mn.us/Business/Search",
+          notes: "Use the legal name to search the Minnesota SOS business database.",
+        },
+      ];
+    case "MS":
+      return [
+        {
+          label: "Mississippi Secretary of State business search",
+          url: "https://corp.sos.ms.gov/corp/portal/c/page/corpBusinessIdSearch/portal.aspx",
+          notes: "Use the legal name to search the Mississippi SOS corporate database.",
+        },
+      ];
+    case "MO":
+      return [
+        {
+          label: "Missouri Secretary of State business search",
+          url: "https://www.sos.mo.gov/BusinessEntity/soskb/csearch.asp",
+          notes: "Use the legal name to search the Missouri SOS business entity database.",
+        },
+      ];
+    case "MT":
+      return [
+        {
+          label: "Montana Secretary of State business search",
+          url: "http://app.mt.gov/bes/",
+          notes: "Use the legal name to search the Montana SOS business entity database.",
+        },
+      ];
+    case "NE":
+      return [
+        {
+          label: "Nebraska Secretary of State business search",
+          url: "https://www.nebraska.gov/sos/corp/corpsearch.cgi",
+          notes: "Use the legal name to search the Nebraska SOS corporate database.",
+        },
+      ];
+    case "NV":
+      return [
+        {
+          label: "Nevada Secretary of State entity search",
+          url: "https://nvsos.gov/sosentitysearch/",
+          notes: "Use the legal name to search the Nevada SOS entity database.",
+        },
+      ];
+    case "NH":
+      return [
+        {
+          label: "New Hampshire Secretary of State business search",
+          url: "http://sos.nh.gov/nhbuslookup.aspx",
+          notes: "Use the legal name to search the New Hampshire SOS business database.",
+        },
+      ];
+    case "NM":
+      return [
+        {
+          label: "New Mexico Secretary of State business search",
+          url: "https://portal.sos.state.nm.us/BFS/online/CorporationBusinessSearch",
+          notes: "Use the legal name to search the New Mexico SOS corporate database.",
+        },
+      ];
+    case "NC":
+      return [
+        {
+          label: "North Carolina Secretary of State business search",
+          url: "http://www.secretary.state.nc.us/corporations/CSearch.aspx",
+          notes: "Use the legal name to search the North Carolina SOS corporate database.",
+        },
+      ];
+    case "ND":
+      return [
+        {
+          label: "North Dakota Secretary of State business search",
+          url: "http://www.nd.gov/sos/businessserv/registrations/business-search.html",
+          notes: "Use the legal name to search the North Dakota SOS business database.",
+        },
+      ];
+    case "OH":
+      return [
+        {
+          label: "Ohio Secretary of State business search",
+          url: "http://www2.sos.state.oh.us/portal/page?_pageid=35,58664",
+          notes: "Use the legal name to search the Ohio SOS business database.",
+        },
+      ];
+    case "OK":
+      return [
+        {
+          label: "Oklahoma Secretary of State business search",
+          url: "https://www.sos.ok.gov/corp/corpinquiryfind.aspx",
+          notes: "Use the legal name to search the Oklahoma SOS corporate database.",
+        },
+      ];
+    case "OR":
+      return [
+        {
+          label: "Oregon Secretary of State business search",
+          url: "http://egov.sos.state.or.us/br/pkg_web_name_srch_inq.login",
+          notes: "Use the legal name to search the Oregon SOS business registry.",
+        },
+      ];
+    case "PA":
+      return [
+        {
+          label: "Pennsylvania business entity search",
+          url: "https://www.corporations.pa.gov/search/corpsearch",
+          notes: "Use the legal name to search the Pennsylvania DOS corporate database.",
+        },
+      ];
+    case "RI":
+      return [
+        {
+          label: "Rhode Island Secretary of State business search",
+          url: "http://ucc.state.ri.us/CorpSearch/CorpSearchInput.asp",
+          notes: "Use the legal name to search the Rhode Island SOS corporate database.",
+        },
+      ];
+    case "SC":
+      return [
+        {
+          label: "South Carolina Secretary of State business search",
+          url: "https://businessfilings.sc.gov/BusinessFiling/Entity/Search",
+          notes: "Use the legal name to search the South Carolina SOS business database.",
+        },
+      ];
+    case "SD":
+      return [
+        {
+          label: "South Dakota Secretary of State business search",
+          url: "http://apps.sd.gov/applications/st32cprs/soscorplookup.aspx",
+          notes: "Use the legal name to search the South Dakota SOS corporate database.",
+        },
+      ];
+    case "TN":
+      return [
+        {
+          label: "Tennessee Secretary of State business search",
+          url: "http://www.tennesseeanytime.org/soscorp/",
+          notes: "Use the legal name to search the Tennessee SOS corporate database.",
+        },
+      ];
+    case "TX":
+      return [
+        {
+          label: "Texas Comptroller business search",
+          url: "http://ecpa.cpa.state.tx.us/coa/Index.html",
+          notes: "Use the legal name to search the Texas Comptroller business database.",
+        },
+      ];
+    case "UT":
+      return [
+        {
+          label: "Utah business entity search",
+          url: "https://secure.utah.gov/uccsearch/uccs",
+          notes: "Use the legal name to search the Utah Division of Corporations business database.",
+        },
+      ];
+    case "VT":
+      return [
+        {
+          label: "Vermont Secretary of State business search",
+          url: "http://www.sec.state.vt.us/seek/corpbrow.htm",
+          notes: "Use the legal name to search the Vermont SOS corporate database.",
+        },
+      ];
+    case "VA":
+      return [
+        {
+          label: "Virginia State Corporation Commission business search",
+          url: "http://www.scc.virginia.gov/clk/bussrch.aspx",
+          notes: "Use the legal name to search the Virginia SCC business entity database.",
+        },
+      ];
+    case "WA":
+      return [
+        {
+          label: "Washington Secretary of State business search",
+          url: "http://www.secstate.wa.gov/corps/corps_search.aspx",
+          notes: "Use the legal name to search the Washington SOS corporate database.",
+        },
+      ];
+    case "WV":
+      return [
+        {
+          label: "West Virginia Secretary of State business search",
+          url: "http://www.wvsos.com/wvcorporations/verifylogon.asp",
+          notes: "Use the legal name to search the West Virginia SOS corporate database.",
+        },
+      ];
+    case "WI":
+      return [
+        {
+          label: "Wisconsin business entity search",
+          url: "https://www.wdfi.org/apps/CorpSearch/Search.aspx",
+          notes: "Use the legal name to search the Wisconsin DFI corporate database.",
+        },
+      ];
     default:
       return [];
   }
