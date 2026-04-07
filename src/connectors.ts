@@ -866,6 +866,14 @@ export class GoodStandingConnector implements StepConnector {
       }
     }
 
+    // Try automated Delaware ICIS form-fill lookup before falling back to manual
+    if (isDelawareJurisdiction(caseRecord.incorporationCountry, caseRecord.incorporationState)) {
+      const icisResult = await tryIcisEntitySearch(context, caseRecord);
+      if (icisResult) {
+        return icisResult;
+      }
+    }
+
     const manualRouting = getManualRegistryRouting(context.snapshot);
     if (manualRouting) {
       return {
@@ -2605,39 +2613,30 @@ async function loadEntityEvidencePageLive(
     // fall through to browser navigation
   }
 
-  const browser = await chromium.launch({
-    headless: true,
-    args: ["--disable-http2", "--disable-blink-features=AutomationControlled", "--no-sandbox"],
-  });
-  const context = await browser.newContext({
-    ignoreHTTPSErrors: true,
-    userAgent: defaultUserAgent(),
-    locale: "en-US",
-  });
-  const page = await context.newPage();
-
+  const browser = await launchStealthBrowser();
   try {
-    await page.goto(url, {
-      waitUntil: "domcontentloaded",
-      timeout: 30_000,
-    });
-    for (let attempt = 0; attempt < browserAttempts; attempt += 1) {
-      await page.waitForTimeout(browserWaitMs);
-      const html = await page.content();
-      const title = await page.title().catch(() => "");
-      if (html.trim() && !isLikelyChallengePage(title, html)) {
-        return {
-          html,
-          finalUrl: page.url(),
-          loadMode: "browser",
-        };
+    const context = await createStealthContext(browser);
+    try {
+      const page = await context.newPage();
+      await page.goto(url, {
+        waitUntil: "domcontentloaded",
+        timeout: 30_000,
+      });
+      for (let attempt = 0; attempt < browserAttempts; attempt += 1) {
+        await page.waitForTimeout(browserWaitMs);
+        const html = await page.content();
+        const title = await page.title().catch(() => "");
+        if (html.trim() && !isLikelyChallengePage(title, html)) {
+          return { html, finalUrl: page.url(), loadMode: "browser" };
+        }
       }
+      return null;
+    } catch {
+      return null;
+    } finally {
+      await context.close();
     }
-    return null;
-  } catch {
-    return null;
   } finally {
-    await context.close();
     await browser.close();
   }
 }
@@ -4633,6 +4632,55 @@ function isDelawareJurisdiction(
   return isUsCountry(incorporationCountry) && normalizeStateToken(incorporationState) === "DE";
 }
 
+// ---------------------------------------------------------------------------
+// Shared stealth browser helpers — Docker/Railway compatible
+// ---------------------------------------------------------------------------
+
+/**
+ * Chrome flags required for headless Chromium in Docker containers.
+ * --disable-dev-shm-usage is critical: /dev/shm defaults to 64MB in Docker,
+ * which causes Chromium render crashes on non-trivial pages.
+ */
+const STEALTH_CHROME_ARGS = [
+  "--disable-dev-shm-usage",
+  "--disable-http2",
+  "--disable-blink-features=AutomationControlled",
+  "--no-sandbox",
+  "--disable-setuid-sandbox",
+  "--disable-gpu",
+  "--disable-background-timer-throttling",
+  "--disable-renderer-backgrounding",
+];
+
+async function launchStealthBrowser(): Promise<
+  Awaited<ReturnType<typeof chromium.launch>>
+> {
+  return chromium.launch({
+    headless: true,
+    args: STEALTH_CHROME_ARGS,
+  });
+}
+
+async function createStealthContext(
+  browser: Awaited<ReturnType<typeof chromium.launch>>
+): Promise<Awaited<ReturnType<Awaited<ReturnType<typeof chromium.launch>>["newContext"]>>> {
+  const context = await browser.newContext({
+    ignoreHTTPSErrors: true,
+    userAgent: defaultUserAgent(),
+    locale: "en-US",
+    viewport: { width: 1280, height: 800 },
+  });
+
+  // Override navigator.webdriver to bypass basic bot detection
+  await context.addInitScript(() => {
+    Object.defineProperty(navigator, "webdriver", {
+      get: () => false,
+    });
+  });
+
+  return context;
+}
+
 function normalizeStateToken(value: string | null): string | null {
   const normalized = normalizeName(value ?? "");
   switch (normalized) {
@@ -4718,115 +4766,99 @@ async function runOfacSearch(
   artifactIds: string[];
   resultCount: number;
 }> {
-  const browser = await chromium.launch({
-    headless: true,
-    args: ["--disable-http2", "--disable-blink-features=AutomationControlled", "--no-sandbox"],
-  });
-  const context = await browser.newContext({
-    ignoreHTTPSErrors: true,
-    userAgent: defaultUserAgent(),
-    locale: "en-US",
-  });
-  const page = await context.newPage();
-
+  const browser = await launchStealthBrowser();
   try {
-    await page.goto("https://sanctionssearch.ofac.treas.gov/", {
-      waitUntil: "domcontentloaded",
-      timeout: 30_000,
-    });
-    await page.fill("#ctl00_MainContent_txtLastName", name);
-    await page.fill("#ctl00_MainContent_Slider1_Boundcontrol", "90");
-    await page.click("#ctl00_MainContent_btnSearch");
-    await page.waitForLoadState("domcontentloaded", { timeout: 10_000 }).catch(
-      () => undefined
-    );
-    await page.waitForTimeout(2_000);
+    const context = await createStealthContext(browser);
+    try {
+      const page = await context.newPage();
 
-    const html = await page.content();
-    const screenshot = await page.screenshot({ fullPage: true }).catch(
-      () => null
-    );
-    const pdf = await page.pdf({ format: "A4", printBackground: true }).catch(
-      () => null
-    );
-    const rowCount = await page
-      .locator("#ctl00_MainContent_gvSearchResults tr")
-      .count()
-      .catch(() => 0);
+      await page.goto("https://sanctionssearch.ofac.treas.gov/", {
+        waitUntil: "domcontentloaded",
+        timeout: 30_000,
+      });
+      await page.waitForSelector("#ctl00_MainContent_txtLastName", { timeout: 15_000 });
+      await page.fill("#ctl00_MainContent_txtLastName", name);
+      await page.fill("#ctl00_MainContent_Slider1_Boundcontrol", "90");
+      await page.click("#ctl00_MainContent_btnSearch");
+      await page.waitForLoadState("networkidle", { timeout: 20_000 }).catch(
+        () => undefined
+      );
+      await page.waitForTimeout(3_000);
 
-    const metadata = {
-      query: name,
-      minimumNameScore: 90,
-      resultCount: rowCount,
-      finalUrl: page.url(),
-      title: await page.title().catch(() => null),
-    };
+      const html = await page.content();
+      const screenshot = await page.screenshot({ fullPage: true }).catch(() => null);
+      const pdf = await page.pdf({ format: "A4", printBackground: true }).catch(() => null);
+      const rowCount = await page
+        .locator("#ctl00_MainContent_gvSearchResults tr")
+        .count()
+        .catch(() => 0);
 
-    const artifacts: ArtifactRecord[] = [];
-    artifacts.push(
-      await artifactStore.saveArtifact({
-        caseId,
-        stepKey: "ofac_search",
-        title: "OFAC Search HTML",
-        sourceId: "ofac_search",
-        sourceUrl: page.url(),
-        fileName: "ofac-search.html",
-        contentType: "text/html",
-        body: html,
-        category: "evidence",
-        metadata: {
-          ...metadata,
-          captureType: "html",
-        },
-      })
-    );
+      const metadata = {
+        query: name,
+        minimumNameScore: 90,
+        resultCount: rowCount,
+        finalUrl: page.url(),
+        title: await page.title().catch(() => null),
+      };
 
-    if (screenshot) {
+      const artifacts: ArtifactRecord[] = [];
       artifacts.push(
         await artifactStore.saveArtifact({
           caseId,
           stepKey: "ofac_search",
-          title: "OFAC Search Screenshot",
+          title: "OFAC Search HTML",
           sourceId: "ofac_search",
           sourceUrl: page.url(),
-          fileName: "ofac-search.png",
-          contentType: "image/png",
-          body: screenshot,
+          fileName: "ofac-search.html",
+          contentType: "text/html",
+          body: html,
           category: "evidence",
-          metadata: {
-            ...metadata,
-            captureType: "screenshot",
-          },
+          metadata: { ...metadata, captureType: "html" },
         })
       );
-    }
 
-    if (pdf) {
-      artifacts.push(
-        await artifactStore.saveArtifact({
-          caseId,
-          stepKey: "ofac_search",
-          title: "OFAC Search PDF",
-          sourceId: "ofac_search",
-          sourceUrl: page.url(),
-          fileName: "ofac-search.pdf",
-          contentType: "application/pdf",
-          body: pdf,
-          category: "evidence",
-          metadata: {
-            ...metadata,
-            captureType: "pdf",
-          },
-        })
-      );
-    }
+      if (screenshot) {
+        artifacts.push(
+          await artifactStore.saveArtifact({
+            caseId,
+            stepKey: "ofac_search",
+            title: "OFAC Search Screenshot",
+            sourceId: "ofac_search",
+            sourceUrl: page.url(),
+            fileName: "ofac-search.png",
+            contentType: "image/png",
+            body: screenshot,
+            category: "evidence",
+            metadata: { ...metadata, captureType: "screenshot" },
+          })
+        );
+      }
 
-    return {
-      artifactIds: artifacts.map((artifact) => artifact.id),
-      resultCount: rowCount,
-    };
+      if (pdf) {
+        artifacts.push(
+          await artifactStore.saveArtifact({
+            caseId,
+            stepKey: "ofac_search",
+            title: "OFAC Search PDF",
+            sourceId: "ofac_search",
+            sourceUrl: page.url(),
+            fileName: "ofac-search.pdf",
+            contentType: "application/pdf",
+            body: pdf,
+            category: "evidence",
+            metadata: { ...metadata, captureType: "pdf" },
+          })
+        );
+      }
+
+      return {
+        artifactIds: artifacts.map((artifact) => artifact.id),
+        resultCount: rowCount,
+      };
+    } finally {
+      await context.close();
+    }
   } finally {
-    await context.close();
     await browser.close();
   }
 }
@@ -5267,6 +5299,272 @@ async function tryRegistryStatusSearch(
   }
 
   return null;
+}
+
+// ---------------------------------------------------------------------------
+// Delaware ICIS automated form-fill lookup
+// ---------------------------------------------------------------------------
+
+const ICIS_SEARCH_URL =
+  "https://icis.corp.delaware.gov/Ecorp/EntitySearch/NameSearch.aspx";
+
+/**
+ * Automates the Delaware ICIS entity search:
+ *  1. Navigates to NameSearch.aspx
+ *  2. Fills entity name (or file number if available from known hints)
+ *  3. Submits the ASP.NET WebForms postback
+ *  4. Clicks the best-matching entity row
+ *  5. Extracts status from the detail page
+ *  6. Returns a StepExecutionResult if successful, null if automation fails
+ */
+async function tryIcisEntitySearch(
+  context: ConnectorContext,
+  caseRecord: CaseSnapshot["caseRecord"]
+): Promise<StepExecutionResult | null> {
+  const suggestions = getOfficialRegistrySuggestionsForCase(caseRecord);
+  const icisSuggestion = suggestions.find(
+    (s) => s.url.includes("icis.corp.delaware.gov") && s.purpose === "locate_entity"
+  );
+
+  const searchName =
+    icisSuggestion?.exactEntityName ??
+    caseRecord.legalName ??
+    caseRecord.displayName;
+  const fileNumber = icisSuggestion?.fileNumber ?? null;
+
+  if (!searchName) {
+    return null;
+  }
+
+  // 75s ceiling prevents zombie Chromium if ICIS is slow/unresponsive
+  const deadline = AbortSignal.timeout(75_000);
+
+  const browser = await launchStealthBrowser();
+  try {
+    const browserContext = await createStealthContext(browser);
+    try {
+      const page = await browserContext.newPage();
+
+      await page.goto(ICIS_SEARCH_URL, {
+        waitUntil: "domcontentloaded",
+        timeout: 30_000,
+      });
+
+      // Prefer file number search (deterministic, one result)
+      let usedFileNumber = false;
+      if (fileNumber && !deadline.aborted) {
+        const fileNumberTab = page.locator(
+          'a[href*="FileNumberSearch"], a:has-text("File Number")'
+        );
+        if (await fileNumberTab.count().catch(() => 0) > 0) {
+          await fileNumberTab.first().click();
+          // Wait for tab content to render — use waitFor instead of count() check
+          const fileNumberInput = page.locator(
+            'input[id*="txtFileNumber"], input[name*="FileNumber"]'
+          );
+          try {
+            await fileNumberInput.waitFor({ timeout: 8_000 });
+            await fileNumberInput.fill(fileNumber);
+            const searchBtn = page.locator(
+              'input[type="submit"][id*="btnSubmit"], input[type="submit"][value*="Search"]'
+            );
+            await searchBtn.click();
+            await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => undefined);
+            await page.waitForTimeout(1_500);
+            usedFileNumber = true;
+          } catch {
+            // File number tab didn't render — fall through to name search
+          }
+        }
+      }
+
+      // Fallback to name search
+      if (!usedFileNumber && !deadline.aborted) {
+        if (!page.url().includes("NameSearch")) {
+          await page.goto(ICIS_SEARCH_URL, { waitUntil: "domcontentloaded", timeout: 20_000 });
+        }
+        const nameInput = page.locator('input[id*="txtEntityName"], input[name*="EntityName"]');
+        await nameInput.waitFor({ timeout: 10_000 });
+        await nameInput.fill(searchName);
+        const searchBtn = page.locator(
+          'input[type="submit"][id*="btnSubmit"], input[type="submit"][value*="Search"]'
+        );
+        await searchBtn.click();
+        await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => undefined);
+        await page.waitForTimeout(1_500);
+      }
+
+      if (deadline.aborted) {
+        return null;
+      }
+
+      // Find best matching entity link — require exact match for compliance safety
+      const resultLinks = page.locator("table tr a");
+      const linkCount = await resultLinks.count().catch(() => 0);
+      if (linkCount === 0) {
+        return null;
+      }
+
+      const normalizedSearch = normalizeName(searchName);
+      let matchedIndex: number | null = null;
+
+      for (let i = 0; i < linkCount; i++) {
+        const text = (await resultLinks.nth(i).textContent().catch(() => "")) ?? "";
+        if (normalizeName(text) === normalizedSearch) {
+          matchedIndex = i;
+          break;
+        }
+      }
+
+      // No exact match — do NOT click an arbitrary entity in a compliance tool
+      if (matchedIndex == null) {
+        return null;
+      }
+
+      // Click through to entity detail
+      await resultLinks.nth(matchedIndex).click();
+      await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => undefined);
+      await page.waitForTimeout(1_500);
+
+      // Capture evidence
+      const detailHtml = await page.content();
+      const detailUrl = page.url();
+      const screenshot = await page.screenshot({ fullPage: true }).catch(() => null);
+      const pdf = await page.pdf({ format: "A4", printBackground: true }).catch(() => null);
+
+      const htmlArtifact = await context.artifactStore.saveArtifact({
+        caseId: caseRecord.id,
+        stepKey: "good_standing",
+        title: "Delaware ICIS Entity Detail",
+        sourceId: "official_registry",
+        sourceUrl: detailUrl,
+        fileName: "icis-entity-detail.html",
+        contentType: "text/html",
+        body: detailHtml,
+        category: "evidence",
+        metadata: { searchName, fileNumber, captureType: "html", automationMode: "icis_form_fill" },
+      });
+      const evidenceIds = [htmlArtifact.id];
+
+      if (screenshot) {
+        const ssArt = await context.artifactStore.saveArtifact({
+          caseId: caseRecord.id,
+          stepKey: "good_standing",
+          title: "Delaware ICIS Screenshot",
+          sourceId: "official_registry",
+          sourceUrl: detailUrl,
+          fileName: "icis-entity-detail.png",
+          contentType: "image/png",
+          body: screenshot,
+          category: "evidence",
+          metadata: { searchName, fileNumber, captureType: "screenshot", automationMode: "icis_form_fill" },
+        });
+        evidenceIds.push(ssArt.id);
+      }
+
+      if (pdf) {
+        const pdfArt = await context.artifactStore.saveArtifact({
+          caseId: caseRecord.id,
+          stepKey: "good_standing",
+          title: "Delaware ICIS PDF",
+          sourceId: "official_registry",
+          sourceUrl: detailUrl,
+          fileName: "icis-entity-detail.pdf",
+          contentType: "application/pdf",
+          body: pdf,
+          category: "evidence",
+          metadata: { searchName, fileNumber, captureType: "pdf", automationMode: "icis_form_fill" },
+        });
+        evidenceIds.push(pdfArt.id);
+      }
+
+      if (detailUrl !== ICIS_SEARCH_URL) {
+        context.storage.updateCaseScreeningFields(caseRecord.id, {
+          registrySearchUrl: detailUrl,
+        });
+      }
+
+      const statusEvidence = findGoodStandingIndicator(detailHtml);
+
+      if (statusEvidence.negativeMatch) {
+        return {
+          status: "failed",
+          note: `Delaware ICIS automated lookup: negative status — ${statusEvidence.negativeMatch}.`,
+          facts: [{
+            stepKey: "good_standing",
+            factKey: "good_standing_status",
+            summary: `Delaware ICIS found negative status: ${statusEvidence.negativeMatch}.`,
+            value: { searchName, fileNumber, statusPhrase: statusEvidence.negativeMatch, registrySearchUrl: detailUrl, automationMode: "icis_form_fill" },
+            verificationStatus: "verified",
+            sourceId: "official_registry",
+            evidenceIds,
+            freshnessExpiresAt: null,
+          }],
+          issues: [{
+            stepKey: "good_standing",
+            severity: "high",
+            title: "Delaware entity has negative registry status",
+            detail: `Automated ICIS lookup for ${searchName} returned: ${statusEvidence.negativeMatch}.`,
+            evidenceIds,
+          }],
+          reviewTasks: [],
+        };
+      }
+
+      if (statusEvidence.positiveMatch) {
+        return {
+          status: "passed",
+          note: `Delaware ICIS automated lookup confirmed: ${statusEvidence.positiveMatch}.`,
+          facts: [{
+            stepKey: "good_standing",
+            factKey: "good_standing_status",
+            summary: `${caseRecord.displayName} confirmed ${statusEvidence.positiveMatch} via automated Delaware ICIS lookup.`,
+            value: { searchName, fileNumber, statusPhrase: statusEvidence.positiveMatch, registrySearchUrl: detailUrl, automationMode: "icis_form_fill" },
+            verificationStatus: "verified",
+            sourceId: "official_registry",
+            evidenceIds,
+            freshnessExpiresAt: addDays(new Date().toISOString(), 30),
+          }],
+          issues: [],
+          reviewTasks: [],
+        };
+      }
+
+      return {
+        status: "manual_review_required",
+        note: "Delaware ICIS page captured, but status phrase not clearly recognized.",
+        facts: [{
+          stepKey: "good_standing",
+          factKey: "good_standing_status",
+          summary: `Delaware ICIS captured ${searchName} detail page; status unclear.`,
+          value: { searchName, fileNumber, registrySearchUrl: detailUrl, automationMode: "icis_form_fill" },
+          verificationStatus: "unverified",
+          sourceId: "official_registry",
+          evidenceIds,
+          freshnessExpiresAt: null,
+        }],
+        issues: [{
+          stepKey: "good_standing",
+          severity: "medium",
+          title: "Delaware ICIS status requires manual interpretation",
+          detail: `Automated ICIS lookup captured the detail page for ${searchName}, but no clear status indicator detected.`,
+          evidenceIds,
+        }],
+        reviewTasks: [{
+          stepKey: "good_standing",
+          title: "Interpret Delaware ICIS entity status",
+          instructions: `Review the captured ICIS detail for ${searchName}${fileNumber ? ` (file #${fileNumber})` : ""}. Determine status and resolve with the exact phrase.`,
+        }],
+      };
+    } finally {
+      await browserContext.close();
+    }
+  } catch (error) {
+    console.error("ICIS automation failed", error instanceof Error ? error.message : error);
+    return null;
+  } finally {
+    await browser.close();
+  }
 }
 
 async function tryWebApiSearch(

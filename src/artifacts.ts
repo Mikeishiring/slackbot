@@ -194,7 +194,16 @@ export class PlaywrightCaptureService implements CaptureService {
   public async capture(request: CaptureRequest): Promise<CaptureResult> {
     const browser = await chromium.launch({
       headless: this.headless,
-      args: ["--disable-http2", "--disable-blink-features=AutomationControlled", "--no-sandbox"],
+      args: [
+        "--disable-dev-shm-usage",
+        "--disable-http2",
+        "--disable-blink-features=AutomationControlled",
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-gpu",
+        "--disable-background-timer-throttling",
+        "--disable-renderer-backgrounding",
+      ],
     });
 
     try {
@@ -224,6 +233,10 @@ export class PlaywrightCaptureService implements CaptureService {
       ignoreHTTPSErrors: true,
       userAgent: defaultUserAgent(),
       locale: "en-US",
+      viewport: { width: 1280, height: 800 },
+    });
+    await context.addInitScript(() => {
+      Object.defineProperty(navigator, "webdriver", { get: () => false });
     });
     const page = await context.newPage();
 
@@ -298,6 +311,7 @@ export class PlaywrightCaptureService implements CaptureService {
       ignoreHTTPSErrors: true,
       userAgent: defaultUserAgent(),
       locale: "en-US",
+      viewport: { width: 1280, height: 800 },
       javaScriptEnabled: false,
     });
     const page = await context.newPage();
