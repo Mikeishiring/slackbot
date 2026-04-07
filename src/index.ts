@@ -8,7 +8,7 @@ import { formatHealthSnapshot, formatRetentionPruneResult } from "./admin.js";
 import { createAgent } from "./agent.js";
 import { getConfig } from "./config.js";
 import { PolicyBotRuntime } from "./runtime.js";
-import { startSlackBot } from "./slack.js";
+import { startSlackBot, type SlackBotHandle } from "./slack.js";
 import { createToolRunner, getToolDefinitions, type ToolContext } from "./tools.js";
 import type { CaseSnapshot, CreateCaseInput } from "./types.js";
 import { asNullableString } from "./utils.js";
@@ -49,7 +49,7 @@ export async function main(
     config.batchWorkerCount
   );
   registerShutdown(runtime, stopBackgroundWorker);
-  let bot;
+  let bot: SlackBotHandle;
   try {
     bot = await startSlackBot({
       botToken: config.slackBotToken ?? "",
@@ -68,6 +68,30 @@ export async function main(
   }
 
   runtime.slackBot = bot;
+
+  // Buffer step notifications and flush as a single consolidated message.
+  // Steps that complete within the flush window (3s) are grouped together.
+  const FLUSH_DELAY_MS = 3_000;
+  const pendingNotifications = new Map<string, {
+    channelId: string;
+    threadTs: string;
+    lines: Array<{ icon: string; linkedLabel: string; detail: string; fallback: string }>;
+    timer: ReturnType<typeof setTimeout>;
+  }>();
+
+  function flushNotifications(threadKey: string): void {
+    const batch = pendingNotifications.get(threadKey);
+    if (!batch) return;
+    pendingNotifications.delete(threadKey);
+
+    const blocks = batch.lines.map((line) => ({
+      type: "section" as const,
+      text: { type: "mrkdwn" as const, text: `${line.icon}  *${line.linkedLabel}*${line.detail}` },
+    }));
+    const fallbackText = batch.lines.map((line) => line.fallback).join("\n");
+
+    bot.postBlocks(batch.channelId, batch.threadTs, blocks, fallbackText).catch(() => undefined);
+  }
 
   runtime.setNotifier(async (caseId, stepKey, status, summary) => {
     let caseRecord;
@@ -100,7 +124,6 @@ export async function main(
         : status === "skipped" ? ":fast_forward:"
         : ":hourglass_flowing_sand:";
 
-    // Hyperlink the step title itself when a source URL is available
     const linkedLabel = sourceUrl
       ? `<${sourceUrl}|${stepLabel}>`
       : stepLabel;
@@ -112,22 +135,22 @@ export async function main(
         : status === "blocked" ? ` \u2014 ${truncatedSummary || "blocked"}`
         : ` ${status}`;
 
-    const fallbackText = `${icon} ${stepLabel}${detail}`;
+    const threadKey = `${caseRecord.slackChannelId}:${caseRecord.slackThreadTs}`;
+    const existing = pendingNotifications.get(threadKey);
 
-    await bot.postBlocks(
-      caseRecord.slackChannelId,
-      caseRecord.slackThreadTs,
-      [
-        {
-          type: "section",
-          text: {
-            type: "mrkdwn",
-            text: `${icon}  *${linkedLabel}*${detail}`,
-          },
-        },
-      ],
-      fallbackText
-    );
+    if (existing) {
+      clearTimeout(existing.timer);
+      existing.lines.push({ icon, linkedLabel, detail, fallback: `${icon} ${stepLabel}${detail}` });
+      existing.timer = setTimeout(() => flushNotifications(threadKey), FLUSH_DELAY_MS);
+    } else {
+      const timer = setTimeout(() => flushNotifications(threadKey), FLUSH_DELAY_MS);
+      pendingNotifications.set(threadKey, {
+        channelId: caseRecord.slackChannelId,
+        threadTs: caseRecord.slackThreadTs,
+        lines: [{ icon, linkedLabel, detail, fallback: `${icon} ${stepLabel}${detail}` }],
+        timer,
+      });
+    }
   });
 }
 

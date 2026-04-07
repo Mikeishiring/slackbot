@@ -1607,17 +1607,22 @@ export class OfacPrecheckConnector implements StepConnector {
       };
     }
 
+    // Link to the human-readable OFAC search page for the GC,
+    // while preserving the technical dataset URL in the artifact body.
+    const OFAC_SEARCH_PAGE = "https://sanctionssearch.ofac.treas.gov/";
+
     const artifact = await context.artifactStore.saveArtifact({
       caseId: context.snapshot.caseRecord.id,
       stepKey: this.stepKey,
       title: "OFAC Precheck Summary",
       sourceId: "ofac_dataset",
-      sourceUrl: dataset.sourceUrl,
+      sourceUrl: OFAC_SEARCH_PAGE,
       fileName: "ofac-precheck.json",
       contentType: "application/json",
       body: JSON.stringify(
         {
-          sourceUrl: dataset.sourceUrl,
+          datasetUrl: dataset.sourceUrl,
+          searchPageUrl: OFAC_SEARCH_PAGE,
           fetchedAt: dataset.fetchedAt,
           normalizedName: name,
         },

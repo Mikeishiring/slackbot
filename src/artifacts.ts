@@ -683,9 +683,17 @@ export function renderCaseReportMarkdown(
       ``,
       ...manualReviewItems.map((task) => {
         const stepLabel = task.stepKey.replace(/_/g, " ");
+        const stepSources = snapshot.artifacts
+          .filter((a) => a.stepKey === task.stepKey && a.sourceUrl)
+          .map((a) => `- Source: [${a.title}](${a.sourceUrl})`);
+        const registryUrl = snapshot.caseRecord.registrySearchUrl;
+        if (registryUrl && task.stepKey === "good_standing" && !stepSources.some((s) => s.includes(registryUrl))) {
+          stepSources.push(`- Registry: [Company Search](${registryUrl})`);
+        }
         return [
           `### ${stepLabel}: ${task.title}`,
           `- ${task.instructions}`,
+          ...stepSources,
           ``,
         ].join("\n");
       }),
@@ -2927,7 +2935,7 @@ async function renderPdf(markdown: string): Promise<Buffer> {
       continue;
     }
 
-    // Status-colored bullet points
+    // Status-colored bullet points (with markdown link support)
     if (trimmed.startsWith("- ")) {
       const content = trimmed.slice(2).trim();
       const color = getLineStatusColor(content);
@@ -2936,10 +2944,31 @@ async function renderPdf(markdown: string): Promise<Buffer> {
         doc.addPage();
       }
 
-      doc.fillColor(color).fontSize(9).font("Helvetica").text(content, 58, doc.y, {
-        width: pageWidth - 8,
-        lineGap: 2,
-      });
+      const bulletLinkPattern = /\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g;
+      if (bulletLinkPattern.test(content)) {
+        bulletLinkPattern.lastIndex = 0;
+        let bulletLastIndex = 0;
+        let bulletMatch: RegExpExecArray | null;
+        while ((bulletMatch = bulletLinkPattern.exec(content)) !== null) {
+          const before = content.slice(bulletLastIndex, bulletMatch.index);
+          if (before) {
+            doc.fillColor(color).fontSize(9).font("Helvetica").text(before, bulletLastIndex === 0 ? 58 : undefined, bulletLastIndex === 0 ? doc.y : undefined, { continued: true, width: pageWidth - 8 });
+          }
+          doc.fillColor(PDF_COLORS.accent).fontSize(9).font("Helvetica").text(bulletMatch[1] ?? "", {
+            link: bulletMatch[2],
+            underline: true,
+            continued: true,
+          });
+          bulletLastIndex = bulletMatch.index + bulletMatch[0].length;
+        }
+        const bulletRemaining = content.slice(bulletLastIndex);
+        doc.fillColor(color).fontSize(9).font("Helvetica").text(bulletRemaining, { lineGap: 2 });
+      } else {
+        doc.fillColor(color).fontSize(9).font("Helvetica").text(content, 58, doc.y, {
+          width: pageWidth - 8,
+          lineGap: 2,
+        });
+      }
       doc.moveDown(0.1);
       continue;
     }

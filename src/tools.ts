@@ -733,6 +733,7 @@ export function createToolRunner(
             .filter(Boolean)
             .join(", ") || null,
           website: snapshot.caseRecord.website,
+          registry_url: snapshot.caseRecord.registrySearchUrl ?? null,
           steps: snapshot.steps.map((step) => ({
             step: step.stepKey,
             status: step.status,
@@ -757,6 +758,9 @@ export function createToolRunner(
               step: issue.stepKey,
               title: issue.title,
             })),
+          entity_structures: snapshot.facts
+            .filter((fact) => fact.factKey === "known_entity_structure")
+            .map((fact) => parseJson<Record<string, unknown>>(fact.valueJson, {})),
           facts_count: snapshot.facts.length,
           artifacts_count: snapshot.artifacts.length,
           created_at: snapshot.caseRecord.createdAt,

@@ -86,6 +86,9 @@ When a user checks on a case (asks "status", "what's happening", etc.):
 - Use get_case to check progress
 - Summarize what passed, what's pending, and what needs their input
 - If there are open review tasks, explain what each one needs and offer to help resolve them
+- Include clickable source links from the step data — make source URLs visible so the reviewer can verify
+- When action is required, include direct links to the relevant registry or search page (from the step sources or registry URL) so the reviewer can go straight there
+- If entity_structures data shows multiple entities, clearly list ALL entities with their jurisdictions and roles — explain which one was used as the primary screening target and why, and note the others exist
 - If the user provides additional info ("they're in Delaware", "legal name is X"), use update_case immediately
 
 Before creating, use search_cases to check for duplicates. If similar active cases exist, tell the user and ask if they want to proceed.
