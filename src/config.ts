@@ -44,6 +44,8 @@ export interface AppConfig {
   braveSearchApiKey: string | null;
   googleSearchApiKey: string | null;
   googleSearchEngineId: string | null;
+  googleDriveServiceAccountKey: string | null;
+  googleDriveFolderId: string | null;
 }
 
 export function getConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
@@ -142,6 +144,8 @@ export function getConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     braveSearchApiKey: readOptionalEnv(env, "BRAVE_SEARCH_API_KEY") ?? null,
     googleSearchApiKey: readOptionalEnv(env, "GOOGLE_SEARCH_API_KEY") ?? null,
     googleSearchEngineId: readOptionalEnv(env, "GOOGLE_SEARCH_ENGINE_ID") ?? null,
+    googleDriveServiceAccountKey: readOptionalEnv(env, "GOOGLE_DRIVE_SERVICE_ACCOUNT_KEY") ?? null,
+    googleDriveFolderId: readOptionalEnv(env, "GOOGLE_DRIVE_FOLDER_ID") ?? null,
   };
 }
 

@@ -4,6 +4,7 @@ import { LocalCaseExporter, formatHealthSnapshot, formatRetentionPruneResult } f
 import { LocalArtifactStore, LocalReportPublisher, PlaywrightCaptureService } from "./artifacts.js";
 import { BraveSearchClient, GoogleCustomSearchClient, RemoteOfacDatasetClient, createDefaultConnectors, type OfacDatasetClient } from "./connectors.js";
 import { AnthropicAdverseClassifier } from "./classifier.js";
+import { GoogleDriveUploader } from "./drive.js";
 import type { AppConfig } from "./config.js";
 import { loadPolicyBundle } from "./policy.js";
 import { PolicyBotStorage } from "./storage.js";
@@ -96,7 +97,16 @@ export class PolicyBotRuntime {
       ),
       this.artifactStore,
       this.captureService,
-      new LocalReportPublisher(this.storage, this.artifactStore),
+      new LocalReportPublisher(
+        this.storage,
+        this.artifactStore,
+        this.config.googleDriveServiceAccountKey && this.config.googleDriveFolderId
+          ? new GoogleDriveUploader(
+              this.config.googleDriveServiceAccountKey,
+              this.config.googleDriveFolderId
+            )
+          : null
+      ),
       {
         jobMaxAttempts: this.config.jobMaxAttempts,
         jobRetryDelayMs: this.config.jobRetryDelayMs,

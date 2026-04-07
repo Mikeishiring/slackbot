@@ -5,6 +5,7 @@ import { PassThrough } from "node:stream";
 import PDFDocument from "pdfkit";
 import { chromium } from "playwright";
 
+import type { DriveUploader } from "./drive.js";
 import type {
   ArtifactRecord,
   CaptureRequest,
@@ -420,7 +421,8 @@ export class PlaywrightCaptureService implements CaptureService {
 export class LocalReportPublisher implements ReportPublisher {
   public constructor(
     private readonly storage: PolicyBotStorage,
-    private readonly artifactStore: ArtifactStore
+    private readonly artifactStore: ArtifactStore,
+    private readonly driveUploader: DriveUploader | null = null
   ) {}
 
   public async publish(snapshot: CaseSnapshot): Promise<{
@@ -536,6 +538,16 @@ export class LocalReportPublisher implements ReportPublisher {
       artifactId: reviewerPacketArtifact.id,
       summary: summarizeReviewerPacket(snapshot),
     });
+
+    // Upload to Google Drive if configured
+    if (this.driveUploader) {
+      try {
+        await this.driveUploader.uploadReport(snapshot, final, pdfArtifact, this.artifactStore);
+        await this.driveUploader.uploadReport(snapshot, reviewerPacket, reviewerPacketArtifact, this.artifactStore);
+      } catch (error) {
+        console.error("Google Drive upload failed (non-blocking)", error);
+      }
+    }
 
     return { working, final, traceability, reviewerPacket };
   }
