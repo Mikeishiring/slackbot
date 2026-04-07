@@ -1,4 +1,5 @@
 import pkg from "@slack/bolt";
+import type { KnownBlock } from "@slack/types";
 const { App } = pkg;
 
 const FALLBACK_ERROR_MESSAGE =
@@ -114,10 +115,12 @@ export interface DirectMessageEvent {
 export type SlackSay = (message: {
   text: string;
   thread_ts: string;
+  blocks?: KnownBlock[];
 }) => Promise<unknown>;
 
 export interface SlackBotHandle {
   postMessage: (channel: string, threadTs: string, text: string) => Promise<void>;
+  postBlocks: (channel: string, threadTs: string, blocks: KnownBlock[], fallbackText: string) => Promise<void>;
   uploadFile: (channel: string, threadTs: string, file: Buffer, filename: string, title: string) => Promise<void>;
 }
 
@@ -199,7 +202,19 @@ export async function startSlackBot(config: SlackConfig): Promise<SlackBotHandle
         await app.client.chat.postMessage({
           channel,
           thread_ts: threadTs,
-          text,
+          text: sanitizeSlackMrkdwn(text),
+        });
+      } catch {
+        // Non-critical notification failure.
+      }
+    },
+    postBlocks: async (channel, threadTs, blocks, fallbackText) => {
+      try {
+        await app.client.chat.postMessage({
+          channel,
+          thread_ts: threadTs,
+          text: fallbackText,
+          blocks,
         });
       } catch {
         // Non-critical notification failure.
@@ -219,6 +234,82 @@ export async function startSlackBot(config: SlackConfig): Promise<SlackBotHandle
       }
     },
   };
+}
+
+/**
+ * Convert GitHub-flavored markdown to Slack mrkdwn.
+ * Claude tends to output **bold**, ### headers, and [links](url) — none of which
+ * render in Slack. This sanitizer catches the most common mismatches.
+ */
+export function sanitizeSlackMrkdwn(text: string): string {
+  return text
+    // ### Header → *Header* (bold line)
+    .replace(/^#{1,6}\s+(.+)$/gm, "*$1*")
+    // **bold** → *bold* (but not already-correct *single*)
+    .replace(/\*\*(.+?)\*\*/g, "*$1*")
+    // [text](url) → <url|text>
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, "<$2|$1>")
+    // --- or *** horizontal rules → ───── divider
+    .replace(/^[-*]{3,}$/gm, "─────────────────────────────")
+    // Collapse triple+ newlines to double
+    .replace(/\n{3,}/g, "\n\n");
+}
+
+/**
+ * Convert a sanitized mrkdwn string into Block Kit blocks.
+ * Splits on blank lines to create distinct section blocks, with dividers
+ * between logical groups. Keeps under the 50-block Slack limit.
+ */
+export function mrkdwnToBlocks(text: string): KnownBlock[] {
+  const MAX_BLOCKS = 49; // leave 1 for potential trailing context
+  const paragraphs = text.split(/\n\n+/).filter((p) => p.trim());
+  const blocks: KnownBlock[] = [];
+
+  for (const paragraph of paragraphs) {
+    if (blocks.length >= MAX_BLOCKS) break;
+
+    const trimmed = paragraph.trim();
+
+    // Horizontal rule → divider block
+    if (/^─{5,}$/.test(trimmed)) {
+      blocks.push({ type: "divider" });
+      continue;
+    }
+
+    // Section that starts with a bold line = header + body
+    const headerMatch = trimmed.match(/^\*([^*]+)\*\n([\s\S]+)$/);
+    if (headerMatch && headerMatch[1] && headerMatch[2]) {
+      blocks.push({
+        type: "header",
+        text: { type: "plain_text", text: headerMatch[1].trim(), emoji: false },
+      });
+      if (blocks.length < MAX_BLOCKS) {
+        blocks.push({
+          type: "section",
+          text: { type: "mrkdwn", text: headerMatch[2].trim() },
+        });
+      }
+      continue;
+    }
+
+    // Standalone bold line = header block
+    const standaloneHeader = trimmed.match(/^\*([^*]+)\*$/);
+    if (standaloneHeader && standaloneHeader[1] && !trimmed.includes("\n")) {
+      blocks.push({
+        type: "header",
+        text: { type: "plain_text", text: standaloneHeader[1].trim(), emoji: false },
+      });
+      continue;
+    }
+
+    // Everything else → section block
+    blocks.push({
+      type: "section",
+      text: { type: "mrkdwn", text: trimmed },
+    });
+  }
+
+  return blocks;
 }
 
 async function getThreadHistory(
@@ -264,7 +355,9 @@ export async function handleIncomingMessage(
       ...message,
       threadHistory,
     });
-    await say({ text: response, thread_ts: message.threadTs });
+    const sanitized = sanitizeSlackMrkdwn(response);
+    const blocks = mrkdwnToBlocks(sanitized);
+    await say({ text: sanitized, thread_ts: message.threadTs, blocks });
   } catch (error) {
     console.error("Failed to handle Slack message", error);
     try {

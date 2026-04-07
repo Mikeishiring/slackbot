@@ -55,7 +55,7 @@ const mockReactions = () => ({
 });
 
 test("handleIncomingMessage sends structured request to the controller", async () => {
-  const sent: Array<{ text: string; thread_ts: string }> = [];
+  const sent: Array<Record<string, unknown>> = [];
   const client = {
     conversations: {
       replies: async () => ({
@@ -87,7 +87,11 @@ test("handleIncomingMessage sends structured request to the controller", async (
     }
   );
 
-  assert.deepEqual(sent, [{ text: "Case summary", thread_ts: "123.000" }]);
+  assert.equal(sent.length, 1);
+  const msg = sent[0]!;
+  assert.equal(msg.text, "Case summary");
+  assert.equal(msg.thread_ts, "123.000");
+  assert.ok(Array.isArray(msg.blocks), "should include blocks array");
 });
 
 test("handleIncomingMessage falls back when the controller throws", async () => {

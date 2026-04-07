@@ -715,92 +715,100 @@ function formatCaseSummary(
     const hasUrlSource = /https?:\/\//i.test(fact.valueJson);
     return !hasEvidence && !hasUrlSource;
   }).length;
-  const lines = [
-    `*${snapshot.caseRecord.displayName}*`,
-    `Case ID: ${snapshot.caseRecord.id}`,
-    `Status: ${snapshot.caseRecord.caseStatus}`,
-    `Recommendation: ${snapshot.caseRecord.recommendation}`,
-  ];
 
+  const sections: string[] = [];
+
+  // Header
+  const header = [`*${snapshot.caseRecord.displayName}*`];
   if (includeCreated) {
-    lines.push("Case created and queued for processing.");
+    header.push("Case created and queued for processing.");
   }
-
   if (snapshot.caseRecord.decisionSummary) {
-    lines.push(`Decision summary: ${snapshot.caseRecord.decisionSummary}`);
+    header.push(snapshot.caseRecord.decisionSummary);
   }
+  sections.push(header.join("\n"));
 
+  // Identity
+  const identity: string[] = [];
+  identity.push(`*Status:* ${snapshot.caseRecord.caseStatus}  \u2022  *Recommendation:* ${snapshot.caseRecord.recommendation}`);
   if (snapshot.caseRecord.legalName) {
-    lines.push(`Legal name: ${snapshot.caseRecord.legalName}`);
+    identity.push(`*Legal name:* ${snapshot.caseRecord.legalName}`);
   }
   if (snapshot.caseRecord.incorporationCountry) {
-    lines.push(
-      `Jurisdiction: ${snapshot.caseRecord.incorporationState ? `${snapshot.caseRecord.incorporationState}, ` : ""}${snapshot.caseRecord.incorporationCountry}`
-    );
+    const jurisdiction = snapshot.caseRecord.incorporationState
+      ? `${snapshot.caseRecord.incorporationState}, ${snapshot.caseRecord.incorporationCountry}`
+      : snapshot.caseRecord.incorporationCountry;
+    identity.push(`*Jurisdiction:* ${jurisdiction}`);
   }
   if (snapshot.caseRecord.registrySearchUrl) {
-    lines.push(`Registry URL: ${snapshot.caseRecord.registrySearchUrl}`);
+    identity.push(`*Registry:* ${snapshot.caseRecord.registrySearchUrl}`);
   }
+  sections.push(identity.join("\n"));
 
+  // Reports
   if (artifactStore) {
+    const reportLines: string[] = [];
     const workingReport = readReportPath(snapshot, artifactStore, "working");
-    const traceabilityReport = readReportPath(
-      snapshot,
-      artifactStore,
-      "traceability"
-    );
-    const reviewerPacketReport = readReportPath(
-      snapshot,
-      artifactStore,
-      "review_packet"
-    );
+    const traceabilityReport = readReportPath(snapshot, artifactStore, "traceability");
+    const reviewerPacketReport = readReportPath(snapshot, artifactStore, "review_packet");
     if (workingReport) {
-      lines.push(
-        `Working report: ${workingReport.path} (v${workingReport.report.versionNumber})`
-      );
+      reportLines.push(`Working report v${workingReport.report.versionNumber}`);
     }
     if (traceabilityReport) {
-      lines.push(
-        `Traceability manifest: ${traceabilityReport.path} (v${traceabilityReport.report.versionNumber})`
-      );
+      reportLines.push(`Traceability manifest v${traceabilityReport.report.versionNumber}`);
     }
     if (reviewerPacketReport) {
-      lines.push(
-        `Reviewer packet: ${reviewerPacketReport.path} (v${reviewerPacketReport.report.versionNumber})`
-      );
+      reportLines.push(`Reviewer packet v${reviewerPacketReport.report.versionNumber}`);
+    }
+    if (reportLines.length > 0) {
+      sections.push(`*Reports:* ${reportLines.join("  \u2022  ")}`);
     }
   }
 
-  lines.push(
-    `Open review tasks: ${openReviewTasks.length}`,
-    `Open issues: ${openIssues.length}`,
-    `Source-gap facts: ${factSourceGaps}`,
-    `Facts: ${snapshot.facts.length}`,
-    `Artifacts: ${snapshot.artifacts.length}`,
-    `Reports: ${snapshot.reports.length}`,
-    `Steps: ${snapshot.steps
-      .map((step) => `${step.stepKey}=${step.status}`)
-      .join(", ")}`
-  );
+  // Steps
+  const stepLines = snapshot.steps.map((step) => {
+    const icon =
+      step.status === "passed" ? ":white_check_mark:"
+        : step.status === "failed" ? ":x:"
+        : step.status === "blocked" ? ":no_entry:"
+        : step.status === "skipped" ? ":fast_forward:"
+        : ":hourglass_flowing_sand:";
+    return `${icon} ${step.stepKey.replace(/_/g, " ")}`;
+  });
+  sections.push(stepLines.join("\n"));
 
+  // Counters
+  const counters = [
+    `${openReviewTasks.length} review tasks`,
+    `${openIssues.length} issues`,
+    `${factSourceGaps} source gaps`,
+    `${snapshot.facts.length} facts`,
+    `${snapshot.artifacts.length} artifacts`,
+  ].join("  \u2022  ");
+  sections.push(counters);
+
+  // Open review tasks
   if (openReviewTasks.length > 0) {
-    lines.push("Open review tasks:");
-    lines.push(...openReviewTasks.map((task) => `- ${task.id}: ${task.title} [${task.stepKey}]`));
+    const taskLines = ["*Open review tasks:*"];
+    taskLines.push(...openReviewTasks.map((task) => `\u2022 \`${task.id}\` ${task.title} _(${task.stepKey.replace(/_/g, " ")})_`));
     if (artifactStore) {
       const stageReportLines = listOpenReviewStageReportPaths(snapshot, artifactStore);
       if (stageReportLines.length > 0) {
-        lines.push("Review stage reports:");
-        lines.push(...stageReportLines.map((line) => `- ${line}`));
+        taskLines.push("*Stage reports:*");
+        taskLines.push(...stageReportLines.map((line) => `\u2022 ${line}`));
       }
     }
+    sections.push(taskLines.join("\n"));
   }
 
+  // Open issues
   if (openIssues.length > 0) {
-    lines.push("Open issues:");
-    lines.push(...openIssues.slice(0, 5).map(formatIssueSummary));
+    const issueLines = ["*Open issues:*"];
+    issueLines.push(...openIssues.slice(0, 5).map(formatIssueSummary));
+    sections.push(issueLines.join("\n"));
   }
 
-  return lines.join("\n");
+  return sections.join("\n\n");
 }
 
 function formatReviewerHandoff(

@@ -83,27 +83,50 @@ export async function main(
     const stepLabel = stepKey.replace(/_/g, " ");
     const truncatedSummary = summary.length > 120 ? `${summary.slice(0, 117)}...` : summary;
 
-    let sourceLink = "";
+    let sourceUrl: string | null = null;
     try {
       const stepArtifacts = runtime.storage.listArtifactsForStep(caseId, stepKey);
       const withUrl = stepArtifacts.find((a) => a.sourceUrl);
       if (withUrl?.sourceUrl) {
-        sourceLink = ` (<${withUrl.sourceUrl}|view source>)`;
+        sourceUrl = withUrl.sourceUrl;
       }
     } catch { /* non-critical */ }
 
-    const line =
-      status === "passed" ? `:white_check_mark: *${stepLabel}*${sourceLink}`
-        : status === "failed" ? `:x: *${stepLabel}* -- ${truncatedSummary || "failed"}${sourceLink}`
-        : status === "manual_review_required" ? `:eyes: *${stepLabel}* -- ${truncatedSummary || "needs review"}${sourceLink}`
-        : status === "blocked" ? `:no_entry: *${stepLabel}* -- ${truncatedSummary || "blocked"}`
-        : status === "skipped" ? `:fast_forward: *${stepLabel}*`
-        : `:hourglass_flowing_sand: *${stepLabel}* ${status}`;
+    const icon =
+      status === "passed" ? ":white_check_mark:"
+        : status === "failed" ? ":x:"
+        : status === "manual_review_required" ? ":eyes:"
+        : status === "blocked" ? ":no_entry:"
+        : status === "skipped" ? ":fast_forward:"
+        : ":hourglass_flowing_sand:";
 
-    await bot.postMessage(
+    // Hyperlink the step title itself when a source URL is available
+    const linkedLabel = sourceUrl
+      ? `<${sourceUrl}|${stepLabel}>`
+      : stepLabel;
+
+    const detail =
+      status === "passed" || status === "skipped" ? ""
+        : status === "failed" ? ` \u2014 ${truncatedSummary || "failed"}`
+        : status === "manual_review_required" ? ` \u2014 ${truncatedSummary || "needs review"}`
+        : status === "blocked" ? ` \u2014 ${truncatedSummary || "blocked"}`
+        : ` ${status}`;
+
+    const fallbackText = `${icon} ${stepLabel}${detail}`;
+
+    await bot.postBlocks(
       caseRecord.slackChannelId,
       caseRecord.slackThreadTs,
-      line
+      [
+        {
+          type: "section",
+          text: {
+            type: "mrkdwn",
+            text: `${icon}  *${linkedLabel}*${detail}`,
+          },
+        },
+      ],
+      fallbackText
     );
   });
 }
