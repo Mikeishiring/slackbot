@@ -437,3 +437,61 @@ See `.env.example` for the full list with all optional configuration.
 | High API costs | Set spend cap in Anthropic Console. Use Sonnet instead of Opus for lower cost |
 | Good standing manual review | Expected -- Delaware doesn't offer free programmatic status checks |
 | `Slack authentication failed` | Check tokens are real, not `.env.example` placeholders |
+
+---
+
+## Security Notes
+
+These notes document the security posture of this bot based on real setup experience.
+
+### What the bot CAN access
+
+| Credential | Access Scope | Risk if Leaked |
+|------------|-------------|----------------|
+| `SLACK_BOT_TOKEN` (xoxb-) | Post messages and upload files ONLY in channels the bot is invited to. Read messages ONLY where @mentioned. | Attacker could post messages as the bot in its channels. Revoke immediately at api.slack.com/apps. |
+| `SLACK_APP_TOKEN` (xapp-) | Establish Socket Mode WebSocket connection. Cannot read messages or post. | Attacker could connect as the bot (but still can't read channels without the bot token). Revoke at api.slack.com/apps. |
+| `ANTHROPIC_API_KEY` | Make Claude API calls billed to your account. No access to Slack or Drive. | Attacker could run up API charges. Set a spend cap at console.anthropic.com. Rotate immediately. |
+| `BRAVE_SEARCH_API_KEY` | Run web searches. No access to Slack, Drive, or any internal systems. | Attacker could use your search quota (2,000/month free). Low risk. |
+| Google service account JSON | Upload/read files ONLY in the specific Drive folder shared with it. Zero access to anything else. | Attacker could read/write files in the shared folder. Remove service account access from the folder to revoke. |
+
+### What the bot CANNOT access
+
+- Messages in channels it hasn't been invited to
+- Messages that don't @mention it (even in channels it's in)
+- Private channels (no `groups:history` scope)
+- DMs (manifest only includes `app_mention`, not `message.im`)
+- Your Google Drive files outside the shared "Policy Bot Reports" folder
+- Any other Slack workspace settings, users, or admin functions
+- Email, calendar, or any Google service besides Drive
+
+### Channel isolation
+
+The bot is designed to operate in **one channel only**. It only responds to @mentions. To restrict it:
+
+1. Invite it to exactly one channel: `/invite @Policy Bot`
+2. Don't invite it anywhere else
+3. It physically cannot see or respond in channels it's not in
+
+Even if someone @mentions "Policy Bot" in a different channel, the bot won't receive the event because Slack only delivers events for channels the bot is a member of.
+
+### Keys exposed during setup
+
+During browser-based setup, the following were visible in the conversation:
+
+- **Brave Search API key** -- rotate at brave.com/search/api
+- **Anthropic API key** -- rotate at console.anthropic.com
+- **Slack tokens** -- visible in screenshots; rotate if concerned (api.slack.com/apps > Policy Bot > regenerate)
+- **Google service account JSON** -- downloaded locally, never committed to git (in `.gitignore`)
+
+**Best practice:** After initial setup, rotate all keys that appeared in any conversation, logs, or screenshots. Store the new keys only in `.env` (local) or Railway environment variables (production). Never commit `.env` to git.
+
+### Socket Mode security
+
+The bot uses Slack's Socket Mode, which means:
+
+- **No public HTTP endpoint** -- the bot connects outbound to Slack's WebSocket servers
+- **No URL to attack** -- there's nothing to send requests to
+- **No webhook validation needed** -- Slack handles authentication via the WebSocket handshake
+- **Firewall-friendly** -- only outbound connections on port 443
+
+This is more secure than traditional webhook-based Slack apps which require a public URL.
