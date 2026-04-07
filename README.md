@@ -1,509 +1,439 @@
-# 🤖 Slack Bot LLM Starter
+# Policy Bot
 
-> Let your team talk to your data, tools, and apps — directly from Slack.
+Automated counterparty screening for crypto infrastructure companies. Tell it who to check in Slack, it runs the compliance workflow and hands you a PDF.
 
 ```
-User: "What's new this week?"
-Bot:  "3 items this week — Q1 roadmap update, Acme's Series B,
-       and the sales pipeline review..."
+You:  "screen Kraken, they're a crypto exchange"
+Bot:  Creates case, resolves Payward Inc. (DE), runs 7 checks...
+      :white_check_mark: entity resolution
+      :white_check_mark: good standing
+      :eyes: reputation search -- 23 results flagged
+      :white_check_mark: bbb review
+      :white_check_mark: ofac precheck
+      :white_check_mark: ofac search
+      "4/5 checks passed. Want me to share the PDF report?"
 ```
-
-Connect it to a database, an API, an internal tool — whatever your team needs to query. They just ask the bot in plain English.
-
-Clone. Set 3 keys. Run.
 
 ---
 
-## ✨ What You Get
+## How It Works
 
-- **Word-overlap search** — natural queries like "series b funding" find the right items, not just exact substrings. Title matches rank higher.
-- **👀 Processing indicator** — the bot reacts with :eyes: when it receives your message, removes it when the reply lands. Your team knows it's working.
-- **Thread context** — follow-up questions work naturally. The bot reads thread history before responding.
-- **Tool loop** — Claude picks the right tool, reads the results, and replies. Up to 10 tool calls per message.
-- **Single config source** — model, timeout, and retry defaults live in one place. No drift between files.
-
----
-
-## ⚡ How It Works
+### View 1: The Simple Version
 
 ```mermaid
 graph LR
-    A["💬 Slack"] -->|"your team asks a question"| B["🧠 Agent"]
-    B -->|"picks the right tool"| C["🔧 Tools"]
-    C -->|"queries"| D["📦 Your Data"]
-    D -->|"results"| C
-    C -->|"answers"| B
-    B -->|"replies in thread"| A
-
-    style A fill:#4A154B,color:#fff,stroke:#4A154B
-    style B fill:#D97706,color:#fff,stroke:#D97706
-    style C fill:#2563EB,color:#fff,stroke:#2563EB
-    style D fill:#059669,color:#fff,stroke:#059669
-```
-
-Someone messages your bot. Claude figures out what they're asking, calls the right tool, gets data back, and replies in the thread. You decide what tools exist and what data they can access.
-
-**4 files, 1 extension point:**
-
-| File | What it does |
-|------|-------------|
-| `src/slack.ts` | Receives messages, posts replies |
-| `src/agent.ts` | Claude API + tool loop |
-| `src/tools.ts` | **Your tools — the one file you customize** |
-| `src/config.ts` | Environment variables + defaults |
-
----
-
-## 🔒 Before You Start — What Gets Stored?
-
-```mermaid
-graph LR
-    subgraph "Your Bot (stateless)"
-        A["Message in"] --> B["Claude processes"] --> C["Reply out"]
-    end
-
-    subgraph "Where data lives"
-        D["Slack<br/>Messages stay in Slack"]
-        E["Anthropic API<br/>Subject to their<br/>retention policy"]
-    end
-
-    B -.->|"API call"| E
-    A -.->|"stored by"| D
-    C -.->|"stored by"| D
-
-    style A fill:#059669,color:#fff,stroke:none
-    style B fill:#D97706,color:#fff,stroke:none
-    style C fill:#059669,color:#fff,stroke:none
-    style D fill:#4A154B,color:#fff,stroke:none
-    style E fill:#2563EB,color:#fff,stroke:none
-```
-
-**Out of the box, this bot stores nothing.** No database, no logs, no conversation history. Messages live in Slack. API calls go to Anthropic (see their [data retention policy](https://www.anthropic.com/policies)).
-
-> **If you add things — a database, an MCP server, a third-party API — those things can store data.** That's where you need to be careful. Each integration you add is a new place where conversations or query results might be logged, cached, or persisted. See [Security](#-security) for what to watch for.
-
----
-
-## 🚀 Setup
-
-You need **3 things**: a Slack app, an Anthropic key, and this repo.
-
-```mermaid
-graph LR
-    A["1️⃣ Create Slack App<br/>Get 2 tokens"] --> B["2️⃣ Get Anthropic Key<br/>~$5 credits"]
-    B --> C["3️⃣ Clone & Run<br/>Paste tokens in .env"]
+    A["Slack message"] --> B["Claude (Opus)"]
+    B --> C["Screening Engine"]
+    C --> D["PDF Report"]
+    D --> E["Slack thread"]
 
     style A fill:#4A154B,color:#fff,stroke:none
     style B fill:#D97706,color:#fff,stroke:none
-    style C fill:#059669,color:#fff,stroke:none
+    style C fill:#2563EB,color:#fff,stroke:none
+    style D fill:#059669,color:#fff,stroke:none
+    style E fill:#4A154B,color:#fff,stroke:none
 ```
 
-### Step 1: Create a Slack App
+Someone messages the bot. Claude understands what they want, runs the screening, and delivers results back to Slack with a PDF report.
 
-1. Go to [api.slack.com/apps](https://api.slack.com/apps) → **Create New App** → **From Scratch**
-2. Name it whatever you want, pick your workspace
-3. **Socket Mode** → toggle on → generate an app token (starts with `xapp-`)
-4. **OAuth & Permissions** → add bot scopes:
-   - `app_mentions:read` — see when someone @mentions the bot
-   - `chat:write` — post replies
-   - `channels:history` — read thread history for context
-   - `reactions:write` — add/remove the 👀 processing indicator
-   - `im:history` — read DMs *(skip this for channel-only mode)*
-5. **Install to Workspace** → copy the bot token (starts with `xoxb-`)
-6. **Event Subscriptions** → toggle on → subscribe to:
-   - `app_mention` — someone @mentions the bot
-   - `message.im` — someone DMs the bot *(skip for channel-only)*
+---
 
-> **Changed scopes or events?** Reinstall the app to the workspace.
-> **Want private channels?** Add `groups:history`, reinstall, and invite the bot.
+### View 2: The Architecture
 
-### Step 2: Get an Anthropic Key
+```mermaid
+graph TB
+    subgraph "Slack Interface"
+        A["User message"] --> B["Socket Mode"]
+        B --> C["Rate Limiter<br/>5 req/min/user"]
+        C --> D["Claude Opus<br/>15 tools available"]
+    end
 
-1. Go to [console.anthropic.com](https://console.anthropic.com)
-2. Create an API key
-3. Add credits (~$5 is plenty to start)
-4. **Set a monthly spend cap** — there's no built-in rate limiting in the bot
+    subgraph "Screening Engine"
+        D --> E["Tool Runner<br/>thread-context-aware"]
+        E --> F["create_case"]
+        E --> G["get_case / search"]
+        E --> H["resolve_review"]
+        E --> I["share_report"]
 
-### Step 3: Clone & Run
+        F --> J["Policy Workflow"]
+        J --> K["Job Queue<br/>SQLite + WAL"]
+    end
+
+    subgraph "Evidence Collection"
+        K --> L["Entity Resolution<br/>Known hints + Web search + TOS"]
+        K --> M["Good Standing<br/>OpenCorporates + Registry search"]
+        K --> N["Reputation Search<br/>Brave API + Noise filter"]
+        K --> O["BBB Review<br/>Rating + Complaints"]
+        K --> P["OFAC Precheck<br/>SDN dataset match"]
+        K --> Q["OFAC Search<br/>Playwright automation"]
+    end
+
+    subgraph "Output"
+        J --> R["PDF Report<br/>styled, status-colored"]
+        J --> S["Step Notifications<br/>emoji in thread"]
+        R --> T["Slack file upload"]
+    end
+
+    style A fill:#4A154B,color:#fff,stroke:none
+    style D fill:#D97706,color:#fff,stroke:none
+    style J fill:#2563EB,color:#fff,stroke:none
+    style R fill:#059669,color:#fff,stroke:none
+    style K fill:#1e40af,color:#fff,stroke:none
+```
+
+---
+
+### View 3: Every Decision Mapped
+
+```mermaid
+flowchart TB
+    START(["Message received"]) --> RATE{"Rate limit<br/>check"}
+    RATE -->|Blocked| RATE_MSG["'Slow down' reply"]
+    RATE -->|Allowed| CLAUDE["Claude Opus processes"]
+
+    CLAUDE --> INTENT{"What does<br/>the user want?"}
+    INTENT -->|"Screen a company"| DUP_CHECK["search_cases<br/>duplicate check"]
+    INTENT -->|"Check status"| GET_CASE["get_case"]
+    INTENT -->|"Review queue"| GET_QUEUE["get_review_queue"]
+    INTENT -->|"Resolve review"| ACL{"Reviewer<br/>access?"}
+    INTENT -->|"Share report"| SHARE["share_report<br/>upload PDF"]
+    INTENT -->|"General question"| ANSWER["Claude answers<br/>from context"]
+
+    ACL -->|Denied| ACL_MSG["'Need reviewer access'"]
+    ACL -->|Allowed| RESOLVE["resolve_review_task"]
+
+    DUP_CHECK --> DUP{"Existing<br/>active case?"}
+    DUP -->|Yes| DUP_WARN["Warn user,<br/>ask to proceed"]
+    DUP -->|No| CREATE["create_case"]
+    DUP_WARN -->|Proceed| CREATE
+
+    CREATE --> BIND["Bind case to<br/>Slack thread"]
+    BIND --> ENQUEUE["Enqueue first<br/>workflow step"]
+
+    subgraph "Background Worker (polls every 5s)"
+        ENQUEUE --> CLAIM["Claim next job<br/>(transactional lock)"]
+        CLAIM --> STEP_TYPE{"Which step?"}
+
+        STEP_TYPE -->|entity_resolution| ER_START["Check known<br/>entity hints"]
+        ER_START --> ER_HINT{"Hint<br/>found?"}
+        ER_HINT -->|Yes| ER_PATCH["Apply curated<br/>legal name + jurisdiction"]
+        ER_HINT -->|No| ER_TOS["Fetch website<br/>TOS pages"]
+        ER_TOS --> ER_TOS_OK{"Legal name<br/>found?"}
+        ER_TOS_OK -->|Yes| ER_PATCH
+        ER_TOS_OK -->|No| ER_WEB["Web search:<br/>'entity incorporation'"]
+        ER_WEB --> ER_WEB_OK{"Name +<br/>jurisdiction?"}
+        ER_WEB_OK -->|Yes| ER_PATCH
+        ER_WEB_OK -->|No| ER_BLOCK["BLOCKED<br/>ask user in Slack"]
+        ER_PATCH --> ER_REGISTRY["Build registry<br/>routing"]
+        ER_REGISTRY --> ER_PASS["PASSED"]
+
+        STEP_TYPE -->|good_standing| GS_START["Search OpenCorporates<br/>+ ICIS + LEI"]
+        GS_START --> GS_FETCH{"Registry page<br/>found?"}
+        GS_FETCH -->|Yes| GS_READ["Fetch page,<br/>extract status"]
+        GS_FETCH -->|No| GS_SNIPPET["Check search<br/>snippets"]
+        GS_READ --> GS_STATUS{"Status<br/>indicator?"}
+        GS_SNIPPET --> GS_STATUS
+        GS_STATUS -->|"Active"| GS_PASS["PASSED"]
+        GS_STATUS -->|"Inactive"| GS_FAIL["FAILED<br/>case terminated"]
+        GS_STATUS -->|"Unknown"| GS_MANUAL["MANUAL REVIEW<br/>registry link provided"]
+
+        STEP_TYPE -->|reputation_search| RS_START["Brave API:<br/>7 queries x 10 results"]
+        RS_START --> RS_CONTEXT["Add industry<br/>qualifier (crypto)"]
+        RS_CONTEXT --> RS_NOISE["Filter noise:<br/>'is X a scam' posts"]
+        RS_NOISE --> RS_COUNT{"Adverse<br/>count?"}
+        RS_COUNT -->|"<= 5"| RS_PASS["PASSED"]
+        RS_COUNT -->|"> 5 + classifier"| RS_LLM["Opus classifies:<br/>enforcement vs noise"]
+        RS_COUNT -->|"> 5 no classifier"| RS_MANUAL["MANUAL REVIEW"]
+        RS_LLM --> RS_REAL{"Real adverse<br/>count?"}
+        RS_REAL -->|"0"| RS_PASS
+        RS_REAL -->|"> 0"| RS_MANUAL
+
+        STEP_TYPE -->|bbb_review| BBB_START["Capture BBB page"]
+        BBB_START --> BBB_EXTRACT["Extract rating +<br/>complaint count"]
+        BBB_EXTRACT --> BBB_CHECK{"Real<br/>complaints?"}
+        BBB_CHECK -->|"No"| BBB_PASS["PASSED"]
+        BBB_CHECK -->|"Yes"| BBB_MANUAL["MANUAL REVIEW"]
+
+        STEP_TYPE -->|ofac_precheck| OFAC_PRE["Download SDN<br/>XML dataset"]
+        OFAC_PRE --> OFAC_MATCH{"Exact name<br/>match?"}
+        OFAC_MATCH -->|No| OFAC_PRE_PASS["PASSED"]
+        OFAC_MATCH -->|Yes| OFAC_PRE_FAIL["CRITICAL: manual review"]
+
+        STEP_TYPE -->|ofac_search| OFAC_SEARCH["Playwright: navigate<br/>OFAC search tool"]
+        OFAC_SEARCH --> OFAC_SCORE{"Results at<br/>score >= 90?"}
+        OFAC_SCORE -->|No| OFAC_SEARCH_PASS["PASSED"]
+        OFAC_SCORE -->|Yes| OFAC_SEARCH_FAIL["CRITICAL: manual review"]
+
+        ER_PASS & ER_BLOCK --> NOTIFY1["Post to Slack thread"]
+        GS_PASS & GS_FAIL & GS_MANUAL --> NOTIFY2["Post to Slack thread"]
+        RS_PASS & RS_MANUAL --> NOTIFY3["Post to Slack thread"]
+        BBB_PASS & BBB_MANUAL --> NOTIFY4["Post to Slack thread"]
+        OFAC_PRE_PASS & OFAC_PRE_FAIL --> NOTIFY5["Post to Slack thread"]
+        OFAC_SEARCH_PASS & OFAC_SEARCH_FAIL --> NOTIFY6["Post to Slack thread"]
+
+        NOTIFY1 & NOTIFY2 & NOTIFY3 & NOTIFY4 & NOTIFY5 & NOTIFY6 --> DECIDE["Evaluate case<br/>decision"]
+        DECIDE --> NEXT["Enqueue next step"]
+    end
+
+    DECIDE --> REPORT["Generate PDF<br/>+ working report"]
+    REPORT --> DONE{"All steps<br/>complete?"}
+    DONE -->|"Yes, all passed"| APPROVED["APPROVED"]
+    DONE -->|"Hard gate failed"| TERMINATED["TERMINATED"]
+    DONE -->|"Reviews pending"| AWAITING["AWAITING REVIEW"]
+
+    style START fill:#4A154B,color:#fff,stroke:none
+    style CLAUDE fill:#D97706,color:#fff,stroke:none
+    style CREATE fill:#2563EB,color:#fff,stroke:none
+    style APPROVED fill:#059669,color:#fff,stroke:none
+    style TERMINATED fill:#DC2626,color:#fff,stroke:none
+    style AWAITING fill:#F59E0B,color:#000,stroke:none
+    style ER_PASS fill:#059669,color:#fff,stroke:none
+    style GS_PASS fill:#059669,color:#fff,stroke:none
+    style RS_PASS fill:#059669,color:#fff,stroke:none
+    style BBB_PASS fill:#059669,color:#fff,stroke:none
+    style OFAC_PRE_PASS fill:#059669,color:#fff,stroke:none
+    style OFAC_SEARCH_PASS fill:#059669,color:#fff,stroke:none
+    style ER_BLOCK fill:#DC2626,color:#fff,stroke:none
+    style GS_FAIL fill:#DC2626,color:#fff,stroke:none
+    style GS_MANUAL fill:#F59E0B,color:#000,stroke:none
+    style RS_MANUAL fill:#F59E0B,color:#000,stroke:none
+    style BBB_MANUAL fill:#F59E0B,color:#000,stroke:none
+    style OFAC_PRE_FAIL fill:#DC2626,color:#fff,stroke:none
+    style OFAC_SEARCH_FAIL fill:#DC2626,color:#fff,stroke:none
+```
+
+---
+
+## Setup
+
+### Prerequisites
+
+- Node.js 20+
+- Slack workspace with admin access
+- Anthropic API key (Claude Opus)
+- Brave Search API key (free, 2000 queries/month)
+
+### 1. Clone & Install
 
 ```bash
 git clone https://github.com/Mikeishiring/slackbot.git && cd slackbot
 npm install
-npm run setup          # installs Playwright Chromium for evidence capture
-cp .env.example .env   # then paste your 3 tokens
-npm start
+npm run setup    # installs Playwright Chromium for evidence capture
 ```
 
-<details>
-<summary>Windows PowerShell</summary>
+### 2. Create Slack App
 
-```powershell
-npm install
-npm run setup
-Copy-Item .env.example .env
-npm start
+1. Go to [api.slack.com/apps](https://api.slack.com/apps) > Create New App > From Scratch
+2. **Socket Mode** > toggle on > generate app token (`xapp-`)
+3. **OAuth & Permissions** > add bot scopes:
+   - `app_mentions:read`, `chat:write`, `channels:history`, `reactions:write`, `im:history`, `files:write`
+4. **Event Subscriptions** > subscribe to: `app_mention`, `message.im`
+5. **Install to Workspace** > copy bot token (`xoxb-`)
+
+### 3. Get API Keys
+
+- **Anthropic**: [console.anthropic.com](https://console.anthropic.com) > Create API key
+- **Brave Search**: [brave.com/search/api](https://brave.com/search/api/) > Get free API key
+
+### 4. Configure
+
+```bash
+cp .env.example .env
 ```
 
-</details>
-
-**Not technical?** You can skip the terminal entirely. Install the [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI with the Chrome extension, open this repo, and ask Claude to set everything up for you — Slack app, Anthropic key, Railway deployment, all of it. It can use your browser to click through the setup pages autonomously.
-
-### Step 4: Test It
-
-1. Invite the bot to a channel: `/invite @YourBotName`
-2. Send: `@YourBotName what's new this week?`
-3. Try a DM too — just message the bot directly
-
-Expected: the bot replies in a thread using the sample dataset.
-
-`npm run check` runs linting and tests locally.
-
-<details>
-<summary>🤖 <strong>Agent / automated setup</strong> (Claude Code, Cursor, Codex)</summary>
-
-<br/>
-
-If you're using an AI coding agent to set this up:
-
-1. **Slack App** — use the **App Manifest** JSON editor (`Settings → App Manifests`), not individual pages. Set `socket_mode_enabled: true`, scopes + events in one shot.
-2. **Tokens** — app-level token with `connections:write`, bot token from OAuth. Both in `.env`.
-3. **Scopes** — `reactions:write` is included by default for the 👀 processing indicator. Skip `im:history` for channel-only mode.
-4. **Railway** — set vars via Raw Editor or GraphQL (`variableCollectionUpsert`), not one-by-one.
-5. **Verify** — `npm run check` locally, then push. Railway auto-deploys.
-
-</details>
-
----
-
-## 🏗️ Architecture
-
-### Project Structure
-
-```
-📁 src/
-  ├── index.ts         → Entry point — wires everything together
-  ├── config.ts        → Env vars, defaults, validation
-  ├── slack.ts         → Socket Mode connection + thread history
-  ├── agent.ts         → Claude API + tool loop (max 10 calls)
-  └── tools.ts         → ⭐ YOUR TOOLS — start here
-📁 data/
-  └── sample-data.json → Starter dataset (swap this out)
-📁 test/               → Contract tests for all 4 modules
-📄 .env.example        → Template — copy to .env and fill in
+Fill in:
+```env
+POLICY_BOT_RUNTIME=slack
+SLACK_BOT_TOKEN=xoxb-your-token
+SLACK_APP_TOKEN=xapp-your-token
+ANTHROPIC_API_KEY=sk-ant-your-key
+BRAVE_SEARCH_API_KEY=your-brave-key
 ```
 
-### The Tool Loop
+### 5. Run
 
-Here's what happens every time someone messages your bot:
-
-```mermaid
-sequenceDiagram
-    participant S as Slack
-    participant A as Agent (Claude)
-    participant T as tools.ts
-
-    S->>A: "What happened with Acme?"
-    A->>T: search_items({query: "Acme"})
-    T-->>A: [{title: "Acme Series B", id: "item-002"...}]
-    A->>T: get_item({id: "item-002"})
-    T-->>A: {content: "Acme raised $45M..."}
-    A-->>S: "Acme announced a $45M Series B led by Sequoia..."
-```
-
-Claude decides which tools to call, how many times (up to 10), and how to phrase the answer. You define what tools exist and what data they return.
-
-### What's Included
-
-The starter ships with 3 read-only tools against a sample JSON file:
-
-| Tool | What it does |
-|------|-------------|
-| `search_items` | Keyword search with optional tag filter |
-| `get_item` | Full details for one item by ID |
-| `list_recent` | Most recent items (default: last 7 days) |
-
----
-
-## 🔧 Connect Your Data
-
-This is where you make it yours. The bot can talk to anything — a database, a REST API, an internal tool, a spreadsheet, a CRM. You're really just answering three questions:
-
-```mermaid
-graph TD
-    A["1️⃣ What can your team ask?"] -->|"tool definitions"| B["Search, lookup, report, summarize..."]
-    C["2️⃣ Where does the answer live?"] -->|"data source"| D["Database, API, file, MCP server..."]
-    E["3️⃣ How do you get it?"] -->|"tool implementation"| F["SQL query, fetch call, SDK method..."]
-
-    style A fill:#2563EB,color:#fff,stroke:none
-    style C fill:#D97706,color:#fff,stroke:none
-    style E fill:#059669,color:#fff,stroke:none
-    style B fill:#1e40af,color:#fff,stroke:none
-    style D fill:#92400e,color:#fff,stroke:none
-    style F fill:#065f46,color:#fff,stroke:none
-```
-
-Open `src/tools.ts` and swap the sample data for your real source.
-
-**Connect a database:**
-```typescript
-import postgres from "postgres";
-const sql = postgres(process.env.DATABASE_URL);
-
-function searchItems(query: string) {
-  return sql`SELECT * FROM items WHERE title ILIKE ${'%' + query + '%'} LIMIT 10`;
-}
-```
-
-**Call a REST API:**
-```typescript
-async function searchItems(query: string) {
-  const res = await fetch(`https://api.example.com/search?q=${query}`);
-  return res.json();
-}
-```
-
-**Some ideas:** connect it to your CRM so the team can ask "what deals closed this week?", hook it up to your analytics API for "how's traffic looking?", or point it at an internal wiki so people can ask "what's our refund policy?" — anything your team currently has to go dig for manually.
-
----
-
-## 📈 How It Scales
-
-You start with one file and three tools. As you add more, the structure grows with you:
-
-```mermaid
-graph LR
-    subgraph "Day 1"
-        A["tools.ts<br/>3 tools, 1 file"]
-    end
-
-    subgraph "Growing"
-        B["tools/<br/>index.ts"]
-        C["search.ts"]
-        D["reports.ts"]
-        E["actions.ts"]
-        B --> C
-        B --> D
-        B --> E
-    end
-
-    subgraph "Multi-source"
-        F["tools/<br/>index.ts"]
-        G["Local tools"]
-        H["MCP servers"]
-        F --> G
-        F --> H
-    end
-
-    A -.->|"split into folder"| B
-    B -.->|"add external sources"| F
-
-    style A fill:#059669,color:#fff,stroke:none
-    style B fill:#2563EB,color:#fff,stroke:none
-    style C fill:#1e40af,color:#fff,stroke:none
-    style D fill:#1e40af,color:#fff,stroke:none
-    style E fill:#1e40af,color:#fff,stroke:none
-    style F fill:#D97706,color:#fff,stroke:none
-    style G fill:#92400e,color:#fff,stroke:none
-    style H fill:#92400e,color:#fff,stroke:none
-```
-
-The key thing: `agent.ts` never changes. It imports `tools` and `runTool` from whatever you give it — one file, a folder of files, or a mix of local tools and external MCP servers. You can keep adding capabilities without touching the core.
-
-When you outgrow a single file, split `tools.ts` into a `tools/` folder. When you want to connect external services, add MCP servers alongside your local tools. The bot doesn't care where the tools come from.
-
----
-
-## 🔌 Scaling with MCP
-
-[Model Context Protocol](https://modelcontextprotocol.io) lets you plug in external tool servers instead of coding everything in `tools.ts`. Think of it like adding plugins.
-
-```mermaid
-graph LR
-    subgraph "Your Bot"
-        A["Agent"] --> B["Local Tools<br/>(tools.ts)"]
-        A --> C["MCP Client"]
-    end
-
-    C --> D["📊 Analytics<br/>MCP Server"]
-    C --> E["🗄️ Database<br/>MCP Server"]
-    C --> F["📁 Files<br/>MCP Server"]
-
-    style A fill:#D97706,color:#fff,stroke:none
-    style B fill:#2563EB,color:#fff,stroke:none
-    style C fill:#7C3AED,color:#fff,stroke:none
-    style D fill:#059669,color:#fff,stroke:none
-    style E fill:#059669,color:#fff,stroke:none
-    style F fill:#059669,color:#fff,stroke:none
-```
-
-| | Local (`tools.ts`) | MCP Server |
-|---|---|---|
-| **Best for** | Simple queries, single data source | Shared services, pre-built integrations |
-| **Setup** | Edit one file | Run a server + connect |
-| **Trust** | You wrote it | Audit what it exposes |
-
-**Start local.** Move to MCP when you need multiple bots sharing the same data, or when a pre-built MCP server already does what you need.
-
----
-
-## 🛡️ Security
-
-Read this before deploying. This bot runs code that has the Slack permissions you granted it.
-
-### What the bot can do with its current permissions
-
-| Scope | What it allows |
-|-------|---------------|
-| `app_mentions:read` | Read any message that @mentions the bot |
-| `chat:write` | Post messages to any channel the bot is in |
-| `channels:history` | Read message history in public channels the bot is in |
-| `reactions:write` | Add/remove emoji reactions (used for 👀 processing indicator) |
-
-That's it. The bot ships with these scopes and nothing more.
-
-### The trust model
-
-When you deploy this bot, you're trusting three things:
-
-**The code in this repo.** `tools.ts` defines what the bot actually does. Anyone with write access to the repo or the deployment can change what happens when the bot is mentioned. A malicious change to `tools.ts` could make the bot read channel history and exfiltrate it, post misleading messages, or misuse the Slack API. Audit `tools.ts` before deploying — it's the only file that should change.
-
-**The Anthropic API.** Claude processes your Slack messages. Anything said to the bot goes through Anthropic's API. Review their [data usage policy](https://www.anthropic.com/policies).
-
-**Your deployment platform.** Whoever has access to your Railway/hosting environment can see your tokens and modify the running code.
-
-### What this bot does NOT do
-
-- It does **not** read DMs (no `im:history` scope)
-- It does **not** access private channels (no `groups:history` scope)
-- It does **not** manage channels, users, or workspace settings
-- It does **not** store messages — thread history is fetched on demand and discarded after the response
-- It does **not** have a database — it's completely stateless
-
-### Recommendations
-
-```mermaid
-graph TB
-    subgraph "🟢 Safe by Default"
-        A["Stateless — no data stored"]
-        B["Read-only tools only"]
-        C["Socket Mode — no public URL"]
-    end
-
-    subgraph "🟡 Watch When Extending"
-        D["Adding Slack scopes"]
-        E["Connecting a database"]
-        F["No rate limiting on API spend"]
-    end
-
-    subgraph "🔴 High Risk"
-        G["Write tools without confirmation"]
-        H["Untrusted MCP servers"]
-        I["Secrets in system prompt"]
-    end
-
-    style A fill:#059669,color:#fff,stroke:none
-    style B fill:#059669,color:#fff,stroke:none
-    style C fill:#059669,color:#fff,stroke:none
-    style D fill:#D97706,color:#fff,stroke:none
-    style E fill:#D97706,color:#fff,stroke:none
-    style F fill:#D97706,color:#fff,stroke:none
-    style G fill:#DC2626,color:#fff,stroke:none
-    style H fill:#DC2626,color:#fff,stroke:none
-    style I fill:#DC2626,color:#fff,stroke:none
-```
-
-**1. Audit `tools.ts` before deploying.** It's the only file that should change. If you see modifications to `slack.ts`, `agent.ts`, or `index.ts` in a PR, understand why before merging.
-
-**2. Limit channel access.** Only invite the bot to channels where you want it. It can only read history in channels it's been invited to.
-
-**3. Use minimal scopes.** This bot intentionally does not request `im:history` (DMs) or `groups:history` (private channels). If you don't need a scope, don't add it. Security here is about omission — you secure it by not granting access, not by configuring something extra.
-
-**4. Rotate tokens if you suspect compromise.** Revoke and regenerate both the bot token and app token from [api.slack.com/apps](https://api.slack.com/apps).
-
-**5. Pin your dependencies.** Run `npm audit` before deploying. Supply chain attacks through npm packages are a real vector.
-
-**6. Keep the Anthropic API key scoped.** Use a dedicated key for this bot, not your org-wide key. Set a [monthly spend cap](https://console.anthropic.com) — there's no built-in rate limiting.
-
-### If you connect a database
-
-**An LLM is not a security boundary.** If you give the bot a database connection, assume a skilled user can get Claude to query anything that connection can reach. System prompt instructions like "never return PII" are suggestions, not walls — they can be bypassed through prompt injection.
-
-This isn't a flaw — it's how LLMs work. Plan for it:
-
-- Keep tools **read-only** — if the worst case is a search query, injection is harmless
-- **Scope your credentials** — read-only replica, only the tables the bot needs, row-level security
-- **Don't put secrets in the system prompt** — assume it can be extracted
-- **Validate tool inputs** in `runTool()` — don't blindly trust what Claude passes in
-- **Enforce access at the data layer** (row-level security, view permissions), never at the prompt layer
-
-### If you connect MCP servers
-
-MCP servers are powerful — and that's the risk. When you connect one, you're giving Claude access to whatever that server exposes.
-
-- Only connect servers **you control or trust** — a malicious server can inject prompts through tool results
-- **Audit tool lists** before connecting (`client.listTools()`)
-- Run MCP servers in the same private network as the bot — not on the public internet
-- **If you can do it in `tools.ts`, do it there** — don't add an external dependency you don't need
-
-### TL;DR
-
-Ship read-only, scope tight, don't store what you don't need. Audit `tools.ts` before every deploy. Treat every MCP server and database connection like a dependency — vet it before you trust it.
-
----
-
-## 🚂 Deploy
-
-**Locally:**
 ```bash
 npm start
 ```
 
-**Railway** (recommended): Push to GitHub → New Project → Deploy from GitHub → add env vars → done. Logs should show `Bot is running (Socket Mode)`.
+Logs should show `Bot is running (Socket Mode)`.
 
-**Other hosts:** Fly.io, Render, DigitalOcean, Docker — anything that runs `npm start` and stays alive. No public URL needed — Socket Mode connects outbound.
+### 6. Test
 
-**Not technical?** Use [Claude Code](https://docs.anthropic.com/en/docs/claude-code) with the Chrome extension to deploy for you. Ask it to create a Railway project, set your environment variables, and push — it can handle the entire deployment through your browser.
+1. Invite the bot: `/invite @YourBotName`
+2. Send: `@YourBotName screen Alchemy, they're a web3 dev platform`
+3. Watch the automated checks run with emoji updates in the thread
 
 ---
 
-## ⚙️ Environment Variables
+## Architecture
+
+### Project Structure
+
+```
+src/
+  index.ts          Entry point, wires Claude + Slack + background worker
+  agent.ts          Claude Opus conversation loop with per-call tool injection
+  tools.ts          15 tools: read (get_case, search) + action (create, resolve, share)
+  runtime.ts        Orchestrator: Slack dispatch, case lifecycle, notifications
+  workflow.ts       Policy engine: step ordering, dependencies, decision evaluation
+  connectors.ts     Evidence gathering: Brave, Playwright, OFAC, known entity hints
+  classifier.ts     Opus-based adverse result classification (enforcement vs noise)
+  storage.ts        SQLite: cases, facts, issues, jobs, audit trail
+  artifacts.ts      Local storage + PDF report generation (PDFKit)
+  policy.ts         YAML policy loader (decision-matrix + source-registry)
+  config.ts         30+ env vars with sensible defaults
+  types.ts          Domain types (cases, facts, issues, reviews, jobs)
+  slack.ts          Socket Mode, rate limiting, file uploads, notifications
+  admin.ts          Case export, health snapshots, retention pruning
+  utils.ts          ID generation, normalization, hashing
+policy/
+  decision-matrix.yml   7-step workflow definition
+  source-registry.yml   Evidence source configuration
+```
+
+### The 7-Step Screening Workflow
+
+| # | Step | Type | What It Does | Auto-Pass Rate |
+|---|------|------|-------------|:--------------:|
+| 1 | Public Market Shortcut | Optional | NYSE/NASDAQ listed? Skip everything | N/A |
+| 2 | Entity Resolution | Hard gate | Resolve legal name + jurisdiction | **100%** |
+| 3 | Good Standing | Hard gate | Verify active in official registry | **17%** |
+| 4 | Reputation Search | Soft | Search for fraud/scam/lawsuit signals | **22%** |
+| 5 | BBB Review | Soft | Better Business Bureau check | **94%** |
+| 6 | OFAC Precheck | Hard gate | Automated sanctions dataset match | **100%** |
+| 7 | OFAC Search | Hard gate | Official OFAC search tool (score 90+) | **100%** |
+
+Hard gates terminate the case on failure. Auto-pass rates measured across 18 crypto companies.
+
+### Entity Resolution Strategy
+
+```mermaid
+graph TD
+    A["Company name + website"] --> B{"Known entity<br/>hint?"}
+    B -->|Yes| C["Apply curated<br/>legal name + jurisdiction"]
+    B -->|No| D["Fetch website<br/>TOS / Legal / Privacy pages"]
+    D --> E{"Legal name<br/>found in page?"}
+    E -->|Yes| F["Extract + patch case"]
+    E -->|No| G["Brave Search:<br/>'entity incorporation'"]
+    G --> H{"Found in search<br/>snippets?"}
+    H -->|Yes| F
+    H -->|No| I["Ask user in Slack"]
+    I --> J["User provides jurisdiction"]
+    J --> F
+    F --> K["Route to official registry"]
+    C --> K
+
+    style A fill:#4A154B,color:#fff,stroke:none
+    style C fill:#059669,color:#fff,stroke:none
+    style F fill:#059669,color:#fff,stroke:none
+    style I fill:#F59E0B,color:#000,stroke:none
+    style K fill:#2563EB,color:#fff,stroke:none
+```
+
+### Known Entity Database
+
+The bot ships with curated entity hints for 18+ crypto companies:
+
+| Company | Legal Entity | Jurisdiction |
+|---------|-------------|:---:|
+| Offchain Labs | Offchain Labs, Inc. | DE |
+| Uniswap Labs | Universal Navigation, Inc. | DE |
+| OP Labs | OP Labs PBC | DE |
+| Flashbots | Flashbots Ltd. | Cayman |
+| Kraken | Payward, Inc. | DE |
+| Alchemy | Alchemy Insights, Inc. | DE |
+| Chainalysis | Chainalysis, Inc. | DE |
+| Polymarket | Polymarket, Inc. | DE |
+| Mesh | Mesh Connect, Inc. | DE |
+| 0x | ZeroEx, Inc. | DE |
+| Privy | Horkos, Inc. | DE |
+| Chainlink | SmartContract Chainlink Ltd. SEZC | Cayman |
+| bloXroute | bloXroute Labs, Inc. | IL |
+| 1inch | 1inch Limited | BVI |
+| Arc | Circle Internet Group, Inc. | DE |
+| Bebop | Wintermute Trading Ltd | UK |
+| Monad | Monad Foundation | Cayman |
+| Rain | Rain Financial Inc. | DE |
+
+Each new company screened builds the database automatically via profile reuse.
+
+### Security & Access Control
+
+- **Rate limiting**: 5 messages/minute/user
+- **Reviewer access**: `POLICY_BOT_REVIEWER_USER_IDS` restricts finalize and resolve actions
+- **Error sanitization**: file paths, PIDs, API keys stripped before reaching Slack
+- **Job locking**: single-transaction recovery + claim prevents double execution
+- **Graceful shutdown**: SIGTERM waits 30s for in-flight jobs
+- **Audit trail**: every action logged with actor, timestamp, case linkage
+
+### Deployment
+
+**Railway** (recommended):
+
+```bash
+git push origin main
+# Railway auto-detects Dockerfile, builds with Chromium
+# Set env vars in Railway dashboard
+```
+
+**Docker**:
+
+```bash
+docker build -t policy-bot .
+docker run -e SLACK_BOT_TOKEN=... -e SLACK_APP_TOKEN=... -e ANTHROPIC_API_KEY=... -e BRAVE_SEARCH_API_KEY=... policy-bot
+```
+
+**Local**:
+
+```bash
+npm start                              # Slack mode
+npm start health                       # System health
+npm start run-batch companies.json 3   # Batch screening with 3 workers
+npm start show-case case_xxx           # Case details
+```
+
+---
+
+## Cost
+
+| Component | Monthly Cost |
+|-----------|:-----------:|
+| Slack | Free |
+| Anthropic (Opus) | ~$20-80 depending on volume |
+| Brave Search | Free (2,000 queries/month) |
+| Railway | ~$5-20 |
+
+Each screening uses ~7 Brave queries + 1-3 Opus tool calls. A team screening 50 companies/month runs about $40-60 total.
+
+---
+
+## Environment Variables
 
 | Variable | Required | Default |
-|----------|----------|---------|
-| `SLACK_BOT_TOKEN` | Yes | — |
-| `SLACK_APP_TOKEN` | Yes | — |
-| `ANTHROPIC_API_KEY` | Yes | — |
+|----------|:--------:|---------|
+| `SLACK_BOT_TOKEN` | Yes | -- |
+| `SLACK_APP_TOKEN` | Yes | -- |
+| `ANTHROPIC_API_KEY` | Yes | -- |
+| `BRAVE_SEARCH_API_KEY` | Recommended | -- |
 | `ANTHROPIC_MODEL` | No | `claude-opus-4-20250918` |
-| `ANTHROPIC_REQUEST_TIMEOUT_MS` | No | `15000` |
-| `ANTHROPIC_MAX_RETRIES` | No | `2` |
+| `POLICY_BOT_RUNTIME` | No | `slack` |
+| `POLICY_BOT_REVIEWER_USER_IDS` | No | anyone can finalize |
+| `POLICY_BOT_OFAC_DATASET_URLS` | No | Treasury defaults |
+| `GOOGLE_SEARCH_API_KEY` | No | Brave preferred |
+
+See `.env.example` for the full list with all optional configuration.
 
 ---
 
-## 💰 Cost
-
-| Component | Monthly cost |
-|-----------|-------------|
-| Slack | Free |
-| Anthropic API | ~$5–50 depending on usage |
-| Railway | ~$5–20 |
-
-**What drives cost:** Every message is one or more API calls. Longer tool responses and deeper threads use more tokens. A team of 10 with moderate usage runs about $10–20/month.
-
----
-
-## 🔧 Troubleshooting
+## Troubleshooting
 
 | Problem | Fix |
 |---------|-----|
 | Bot doesn't respond | Check scopes + event subscriptions. Reinstall app after changes. |
 | `Bot is running` but no replies | Invite the bot: `/invite @YourBotName` |
-| `not_found_error` on model | Check `ANTHROPIC_MODEL` is a valid model ID |
-| Socket keeps disconnecting | Check `SLACK_APP_TOKEN` starts with `xapp-` |
-| High API costs | Set spend cap in Anthropic Console. Reduce tool response sizes. |
-| `Missing required environment variable` | Check `.env` has all 3 required vars filled in |
-
----
-
-## 📝 Notes
-
-This repo is intentionally small. The only file you need to change is `src/tools.ts` — swap the sample JSON for your database, API, or MCP server and ship it.
+| Reputation search returns 0 results | Set `BRAVE_SEARCH_API_KEY` -- Google blocks headless browsers |
+| Entity resolution blocked | Bot will ask for jurisdiction in Slack. Common: DE, Cayman, BVI |
+| High API costs | Set spend cap in Anthropic Console. Use Sonnet instead of Opus for lower cost |
+| Good standing manual review | Expected -- Delaware doesn't offer free programmatic status checks |
+| `Slack authentication failed` | Check tokens are real, not `.env.example` placeholders |
