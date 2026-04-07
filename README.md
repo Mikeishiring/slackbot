@@ -416,7 +416,7 @@ Each screening uses ~7 Brave queries + 1-3 Opus tool calls. A team screening 50 
 | `SLACK_APP_TOKEN` | Yes | -- |
 | `ANTHROPIC_API_KEY` | Yes | -- |
 | `BRAVE_SEARCH_API_KEY` | Recommended | -- |
-| `ANTHROPIC_MODEL` | No | `claude-opus-4-20250918` |
+| `ANTHROPIC_MODEL` | No | `claude-opus-4-6-20260205` |
 | `POLICY_BOT_RUNTIME` | No | `slack` |
 | `POLICY_BOT_REVIEWER_USER_IDS` | No | anyone can finalize |
 | `POLICY_BOT_OFAC_DATASET_URLS` | No | Treasury defaults |
