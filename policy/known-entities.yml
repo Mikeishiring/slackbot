@@ -69,11 +69,12 @@ entities:
         title: "Flashbots Terms of Service"
         sourceId: "company_website"
         curatedPatch:
-          legalName: "Flashbots Ltd."
-          incorporationCountry: "Cayman Islands"
+          legalName: "FLASHBOTS US, LLC"
+          incorporationCountry: "US"
+          incorporationState: "DE"
         curatedRationale:
-          - "curated mapping: official Flashbots terms identify Flashbots Ltd."
-          - "curated mapping: prior government filing research identifies Flashbots Ltd. as a Cayman Islands entity"
+          - "curated mapping: FLASHBOTS US, LLC is the Delaware operating entity for US contracts"
+          - "curated mapping: Flashbots Ltd. (Cayman) is the holding company — US counterparty screening uses the Delaware affiliate"
     registrySuggestions:
       - label: "Cayman company search"
         url: "https://online.ciregistry.gov.ky/"
