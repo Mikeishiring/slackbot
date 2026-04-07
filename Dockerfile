@@ -21,7 +21,6 @@ COPY . .
 
 # Data directory (SQLite, artifacts, reports)
 RUN mkdir -p /app/var
-VOLUME /app/var
 
 ENV POLICY_BOT_RUNTIME=slack
 ENV POLICY_BOT_DATA_DIR=/app/var
