@@ -17,6 +17,7 @@ const PLACEHOLDER_TEXT = "…";
 const STREAM_UPDATE_INTERVAL_MS = 1_500;
 const MAX_CHUNK_SIZE = 3_500;
 const STREAM_TRUNCATION_SUFFIX = "… _(continuing)_";
+const NO_UNFURL = { unfurl_links: false, unfurl_media: false } as const;
 
 type OnTextDelta = (delta: string, fullText: string) => void;
 
@@ -46,6 +47,8 @@ export interface SlackChatClient {
       channel: string;
       ts: string;
       text: string;
+      unfurl_links?: boolean;
+      unfurl_media?: boolean;
     }) => Promise<unknown>;
   };
 }
@@ -96,6 +99,8 @@ export interface DirectMessageEvent {
 export type SlackSay = (message: {
   text: string;
   thread_ts: string;
+  unfurl_links?: boolean;
+  unfurl_media?: boolean;
 }) => Promise<{ ts?: string } | undefined>;
 
 export async function startSlackBot(config: SlackConfig): Promise<void> {
@@ -213,6 +218,7 @@ export async function handleIncomingMessage(
           channel,
           ts: placeholderTs,
           text: truncateForStream(toSlackMrkdwn(nextText)),
+          ...NO_UNFURL,
         }),
       STREAM_UPDATE_INTERVAL_MS
     );
@@ -224,7 +230,12 @@ export async function handleIncomingMessage(
     await updater.cancel();
 
     const chunks = chunkText(toSlackMrkdwn(response), MAX_CHUNK_SIZE);
-    await client.chat.update({ channel, ts: placeholderTs, text: chunks[0] ?? "" });
+    await client.chat.update({
+      channel,
+      ts: placeholderTs,
+      text: chunks[0] ?? "",
+      ...NO_UNFURL,
+    });
     if (chunks.length > 1) {
       await sendChunks(say, threadTs, chunks.slice(1));
     }
@@ -267,7 +278,7 @@ async function postPlaceholder(
   threadTs: string
 ): Promise<{ ts?: string } | undefined> {
   try {
-    return await say({ text: PLACEHOLDER_TEXT, thread_ts: threadTs });
+    return await say({ text: PLACEHOLDER_TEXT, thread_ts: threadTs, ...NO_UNFURL });
   } catch (error) {
     console.error("Failed to post placeholder message", error);
     return undefined;
@@ -287,6 +298,7 @@ async function sendErrorReply(
         channel,
         ts: placeholderTs,
         text: FALLBACK_ERROR_MESSAGE,
+        ...NO_UNFURL,
       });
       return;
     } catch (updateError) {
@@ -295,7 +307,7 @@ async function sendErrorReply(
   }
 
   try {
-    await say({ text: FALLBACK_ERROR_MESSAGE, thread_ts: threadTs });
+    await say({ text: FALLBACK_ERROR_MESSAGE, thread_ts: threadTs, ...NO_UNFURL });
   } catch (replyError) {
     console.error("Failed to send Slack error message", replyError);
   }
@@ -403,7 +415,7 @@ async function sendChunks(
   chunks: string[]
 ): Promise<void> {
   for (const chunk of chunks) {
-    await say({ text: chunk, thread_ts: threadTs });
+    await say({ text: chunk, thread_ts: threadTs, ...NO_UNFURL });
   }
 }
 

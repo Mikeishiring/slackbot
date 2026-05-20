@@ -288,6 +288,57 @@ test("createThrottledUpdater deduplicates consecutive identical text", async () 
   assert.deepEqual(calls, ["same"]);
 });
 
+test("handleIncomingMessage disables link unfurling on every outbound message", async () => {
+  const updateCalls: Array<{
+    text: string;
+    unfurl_links?: boolean;
+    unfurl_media?: boolean;
+  }> = [];
+  const client = {
+    conversations: { replies: async () => ({ messages: [] }) },
+    chat: {
+      update: async (params: {
+        text: string;
+        unfurl_links?: boolean;
+        unfurl_media?: boolean;
+      }) => {
+        updateCalls.push(params);
+      },
+    },
+    reactions: { add: async () => {}, remove: async () => {} },
+  };
+
+  const sayCalls: Array<{
+    text: string;
+    unfurl_links?: boolean;
+    unfurl_media?: boolean;
+  }> = [];
+
+  await handleIncomingMessage(
+    client,
+    async (message) => {
+      sayCalls.push(message);
+      return { ts: "T1" };
+    },
+    "C1",
+    "100.000",
+    "hello",
+    async () => "answer with a link https://example.com",
+    "100.001"
+  );
+
+  // Every say() and chat.update() should carry unfurling disabled.
+  for (const call of sayCalls) {
+    assert.equal(call.unfurl_links, false, "say() unfurl_links should be false");
+    assert.equal(call.unfurl_media, false, "say() unfurl_media should be false");
+  }
+  for (const call of updateCalls) {
+    assert.equal(call.unfurl_links, false, "chat.update unfurl_links should be false");
+    assert.equal(call.unfurl_media, false, "chat.update unfurl_media should be false");
+  }
+  assert.ok(sayCalls.length > 0 && updateCalls.length > 0, "both paths must have been exercised");
+});
+
 test("handleIncomingMessage chunks long responses across multiple messages", async () => {
   const { client, updates, reactions } = makeChatClient();
   const sent: Array<{ text: string; thread_ts: string }> = [];
