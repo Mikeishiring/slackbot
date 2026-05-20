@@ -8,6 +8,8 @@
 import pkg from "@slack/bolt";
 const { App } = pkg;
 
+import { toSlackMrkdwn } from "./format.js";
+
 const FALLBACK_ERROR_MESSAGE =
   "I hit an error while processing that message. Please try again.";
 const THREAD_HISTORY_LIMIT = 20;
@@ -196,7 +198,11 @@ export async function handleIncomingMessage(
 
     if (!placeholder?.ts) {
       const response = await onMessage(text, threadHistory);
-      await sendChunks(say, threadTs, chunkText(response, MAX_CHUNK_SIZE));
+      await sendChunks(
+        say,
+        threadTs,
+        chunkText(toSlackMrkdwn(response), MAX_CHUNK_SIZE)
+      );
       return;
     }
 
@@ -206,7 +212,7 @@ export async function handleIncomingMessage(
         client.chat.update({
           channel,
           ts: placeholderTs,
-          text: truncateForStream(nextText),
+          text: truncateForStream(toSlackMrkdwn(nextText)),
         }),
       STREAM_UPDATE_INTERVAL_MS
     );
@@ -217,7 +223,7 @@ export async function handleIncomingMessage(
 
     await updater.cancel();
 
-    const chunks = chunkText(response, MAX_CHUNK_SIZE);
+    const chunks = chunkText(toSlackMrkdwn(response), MAX_CHUNK_SIZE);
     await client.chat.update({ channel, ts: placeholderTs, text: chunks[0] ?? "" });
     if (chunks.length > 1) {
       await sendChunks(say, threadTs, chunks.slice(1));
