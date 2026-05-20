@@ -17,9 +17,11 @@ Clone. Set 3 keys. Run.
 ## ✨ What You Get
 
 - **Word-overlap search** — natural queries like "series b funding" find the right items, not just exact substrings. Title matches rank higher.
-- **👀 Processing indicator** — the bot reacts with :eyes: when it receives your message, removes it when the reply lands. Your team knows it's working.
+- **👀 Processing indicator + streaming replies** — the bot reacts with :eyes: the instant your message arrives, posts a placeholder reply, then streams Claude's text into it as it's generated. Two signals: "I see you" and "answer forming now."
 - **Thread context** — follow-up questions work naturally. The bot reads thread history before responding.
 - **Tool loop** — Claude picks the right tool, reads the results, and replies. Up to 10 tool calls per message.
+- **Long-response chunking** — answers longer than Slack's 3,500-char message limit auto-split on paragraph boundaries and post as a chain of replies in the same thread.
+- **Optional channel allowlist** — set `SLACK_ALLOWED_CHANNELS` to restrict @-mention responses to specific channels (DMs always allowed). Defense against accidental exposure if the bot is invited somewhere unexpected.
 - **Single config source** — model, timeout, and retry defaults live in one place. No drift between files.
 
 ---
@@ -474,6 +476,7 @@ npm start
 | `ANTHROPIC_MODEL` | No | `claude-opus-4-20250918` |
 | `ANTHROPIC_REQUEST_TIMEOUT_MS` | No | `15000` |
 | `ANTHROPIC_MAX_RETRIES` | No | `2` |
+| `SLACK_ALLOWED_CHANNELS` | No | — (any channel) |
 
 ---
 

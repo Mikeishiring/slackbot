@@ -37,6 +37,8 @@ type RunTool = (
   input: Record<string, unknown>
 ) => Promise<unknown>;
 
+export type OnTextDelta = (delta: string, fullText: string) => void;
+
 interface AgentConfig {
   anthropicApiKey: string;
   tools: Tool[];
@@ -47,7 +49,11 @@ interface AgentConfig {
 }
 
 interface Agent {
-  respond: (text: string, threadHistory: string[]) => Promise<string>;
+  respond: (
+    text: string,
+    threadHistory: string[],
+    onTextDelta?: OnTextDelta
+  ) => Promise<string>;
 }
 
 export function createAgent(config: AgentConfig): Agent {
@@ -59,9 +65,20 @@ export function createAgent(config: AgentConfig): Agent {
   const model = config.model ?? DEFAULT_ANTHROPIC_MODEL;
 
   return {
-    respond: async (text: string, threadHistory: string[]): Promise<string> => {
+    respond: async (
+      text: string,
+      threadHistory: string[],
+      onTextDelta?: OnTextDelta
+    ): Promise<string> => {
       const messages = buildMessages(threadHistory, text);
-      return runConversation(client, model, config.tools, config.runTool, messages);
+      return runConversation(
+        client,
+        model,
+        config.tools,
+        config.runTool,
+        messages,
+        onTextDelta
+      );
     },
   };
 }
@@ -84,21 +101,38 @@ export async function runConversation(
   model: string,
   tools: Tool[],
   runTool: RunTool,
-  messages: MessageParam[]
+  messages: MessageParam[],
+  onTextDelta?: OnTextDelta
 ): Promise<string> {
   const conversation = [...messages];
+  let streamedText = "";
 
   for (let i = 0; i < MAX_TOOL_CALLS; i++) {
     let response: Message;
 
     try {
-      response = (await client.messages.create({
+      const stream = client.messages.stream({
         model,
         max_tokens: 4096,
         system: SYSTEM_PROMPT,
         tools,
         messages: conversation,
-      })) as Message;
+      });
+
+      if (onTextDelta) {
+        const separator = streamedText ? "\n\n" : "";
+        if (separator) {
+          streamedText += separator;
+          onTextDelta(separator, streamedText);
+        }
+
+        stream.on("text", (delta: string) => {
+          streamedText += delta;
+          onTextDelta(delta, streamedText);
+        });
+      }
+
+      response = await stream.finalMessage();
     } catch (error) {
       console.error("Model request failed", error);
       return "I couldn't reach the model right now. Please try again.";

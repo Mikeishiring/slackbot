@@ -6,6 +6,7 @@ const LEGACY_ANTHROPIC_MAX_ATTEMPTS_ENV = "ANTHROPIC_MAX_ATTEMPTS" as const;
 export interface AppConfig {
   slackBotToken: string;
   slackAppToken: string;
+  slackAllowedChannels?: ReadonlySet<string>;
   anthropicApiKey: string;
   anthropicModel: string;
   anthropicRequestTimeoutMs: number;
@@ -13,9 +14,12 @@ export interface AppConfig {
 }
 
 export function getConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
+  const slackAllowedChannels = readChannelAllowlist(env, "SLACK_ALLOWED_CHANNELS");
+
   return {
     slackBotToken: readRequiredEnv(env, "SLACK_BOT_TOKEN"),
     slackAppToken: readRequiredEnv(env, "SLACK_APP_TOKEN"),
+    ...(slackAllowedChannels ? { slackAllowedChannels } : {}),
     anthropicApiKey: readRequiredEnv(env, "ANTHROPIC_API_KEY"),
     anthropicModel:
       readOptionalEnv(env, "ANTHROPIC_MODEL") ?? DEFAULT_ANTHROPIC_MODEL,
@@ -30,6 +34,21 @@ export function getConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       DEFAULT_ANTHROPIC_MAX_RETRIES
     ),
   };
+}
+
+function readChannelAllowlist(
+  env: NodeJS.ProcessEnv,
+  name: keyof NodeJS.ProcessEnv
+): ReadonlySet<string> | undefined {
+  const value = readOptionalEnv(env, name);
+  if (!value) return undefined;
+
+  const channels = value
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+
+  return channels.length > 0 ? new Set(channels) : undefined;
 }
 
 function readRequiredEnv(

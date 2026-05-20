@@ -57,6 +57,7 @@ Optional:
 - `ANTHROPIC_MODEL`
 - `ANTHROPIC_REQUEST_TIMEOUT_MS`
 - `ANTHROPIC_MAX_RETRIES`
+- `SLACK_ALLOWED_CHANNELS` (comma-separated channel IDs; restricts @-mention responses; DMs always allowed)
 
 Local development uses `.env` automatically. The repo includes `.env.example`.
 

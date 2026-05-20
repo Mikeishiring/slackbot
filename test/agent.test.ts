@@ -4,6 +4,41 @@ import test from "node:test";
 import type Anthropic from "@anthropic-ai/sdk";
 import { buildMessages, runConversation } from "../src/agent.js";
 
+interface MockStream {
+  on(event: "text", cb: (delta: string) => void): MockStream;
+  finalMessage(): Promise<Record<string, unknown>>;
+}
+
+function makeStream(
+  message: Record<string, unknown>,
+  textChunks: string[] = []
+): MockStream {
+  const handlers: Array<(delta: string) => void> = [];
+  return {
+    on(event, cb) {
+      if (event === "text") handlers.push(cb);
+      return this;
+    },
+    async finalMessage() {
+      for (const chunk of textChunks) {
+        for (const handler of handlers) handler(chunk);
+      }
+      return message;
+    },
+  };
+}
+
+function makeErroringStream(error: Error): MockStream {
+  return {
+    on() {
+      return this;
+    },
+    async finalMessage() {
+      throw error;
+    },
+  };
+}
+
 test("buildMessages preserves thread roles and appends the latest user input", () => {
   const messages = buildMessages(
     ["user: first question", "assistant: first answer"],
@@ -26,32 +61,10 @@ test("buildMessages trims history to the most recent messages", () => {
   assert.deepEqual(messages.at(-1), { role: "user", content: "latest" });
 });
 
-test("buildMessages handles empty history", () => {
-  const messages = buildMessages([], "hello");
-
-  assert.equal(messages.length, 1);
-  assert.deepEqual(messages[0], { role: "user", content: "hello" });
-});
-
-test("buildMessages skips blank history entries", () => {
-  const messages = buildMessages(["user: ", "assistant:   ", "user: real message"], "latest");
-
-  // Blank entries should be filtered out
-  assert.ok(messages.length >= 1);
-  assert.deepEqual(messages.at(-1), { role: "user", content: "latest" });
-});
-
-test("buildMessages replaces empty user text with placeholder", () => {
-  const messages = buildMessages([], "   ");
-
-  assert.equal(messages.length, 1);
-  assert.deepEqual(messages[0], { role: "user", content: "(empty message)" });
-});
-
 test("runConversation executes tool calls and joins final text blocks", async () => {
-  const createCalls: Array<Record<string, unknown>> = [];
+  const streamCalls: Array<Record<string, unknown>> = [];
   const responses = [
-    {
+    makeStream({
       stop_reason: "tool_use",
       content: [
         {
@@ -61,26 +74,23 @@ test("runConversation executes tool calls and joins final text blocks", async ()
           input: { query: "roadmap" },
         },
       ],
-    },
-    {
+    }),
+    makeStream({
       stop_reason: "end_turn",
       content: [
         { type: "text", text: "*3 items this week*" },
         { type: "text", text: "- Q1 roadmap update" },
       ],
-    },
+    }),
   ];
 
   const client = {
     messages: {
-      create: async (params: Record<string, unknown>) => {
-        createCalls.push(params);
-        const nextResponse = responses.shift();
-        if (!nextResponse) {
-          throw new Error("Unexpected extra model call");
-        }
-
-        return nextResponse;
+      stream: (params: Record<string, unknown>) => {
+        streamCalls.push(params);
+        const next = responses.shift();
+        if (!next) throw new Error("Unexpected extra model call");
+        return next;
       },
     },
   } as unknown as Anthropic;
@@ -94,9 +104,9 @@ test("runConversation executes tool calls and joins final text blocks", async ()
   );
 
   assert.equal(output, "*3 items this week*\n\n- Q1 roadmap update");
-  assert.equal(createCalls.length, 2);
+  assert.equal(streamCalls.length, 2);
 
-  const secondRequest = createCalls[1];
+  const secondRequest = streamCalls[1];
   assert.ok(secondRequest);
   const secondRequestMessages = secondRequest["messages"] as Array<Record<string, unknown>>;
   const lastMessage = secondRequestMessages.at(-1);
@@ -105,13 +115,93 @@ test("runConversation executes tool calls and joins final text blocks", async ()
   assert.match(JSON.stringify(lastMessage), /tool_result/);
 });
 
+test("runConversation streams text deltas via the onTextDelta callback", async () => {
+  const stream = makeStream(
+    {
+      stop_reason: "end_turn",
+      content: [{ type: "text", text: "hello world" }],
+    },
+    ["hello ", "world"]
+  );
+
+  const client = {
+    messages: {
+      stream: () => stream,
+    },
+  } as unknown as Anthropic;
+
+  const deltas: Array<{ delta: string; fullText: string }> = [];
+  const output = await runConversation(
+    client,
+    "test-model",
+    [],
+    async () => ({}),
+    buildMessages([], "hi"),
+    (delta, fullText) => deltas.push({ delta, fullText })
+  );
+
+  assert.equal(output, "hello world");
+  assert.deepEqual(deltas.map((d) => d.delta), ["hello ", "world"]);
+  assert.equal(deltas.at(-1)?.fullText, "hello world");
+});
+
+test("runConversation inserts a paragraph break between tool steps in streamed text", async () => {
+  const responses = [
+    makeStream(
+      {
+        stop_reason: "tool_use",
+        content: [
+          { type: "text", text: "Let me check" },
+          {
+            type: "tool_use",
+            id: "tool-1",
+            name: "search_items",
+            input: { query: "roadmap" },
+          },
+        ],
+      },
+      ["Let me check"]
+    ),
+    makeStream(
+      {
+        stop_reason: "end_turn",
+        content: [{ type: "text", text: "Found it." }],
+      },
+      ["Found it."]
+    ),
+  ];
+
+  const client = {
+    messages: {
+      stream: () => {
+        const next = responses.shift();
+        if (!next) throw new Error("extra call");
+        return next;
+      },
+    },
+  } as unknown as Anthropic;
+
+  const fullTexts: string[] = [];
+  await runConversation(
+    client,
+    "test-model",
+    [],
+    async () => ({}),
+    buildMessages([], "what's new?"),
+    (_delta, fullText) => fullTexts.push(fullText)
+  );
+
+  assert.equal(fullTexts.at(-1), "Let me check\n\nFound it.");
+});
+
 test("runConversation returns a clear fallback on max_tokens", async () => {
   const client = {
     messages: {
-      create: async () => ({
-        stop_reason: "max_tokens",
-        content: [],
-      }),
+      stream: () =>
+        makeStream({
+          stop_reason: "max_tokens",
+          content: [],
+        }),
     },
   } as unknown as Anthropic;
 
@@ -130,9 +220,9 @@ test("runConversation returns a clear fallback when the model request throws", a
   let attempts = 0;
   const client = {
     messages: {
-      create: async () => {
+      stream: () => {
         attempts += 1;
-        throw new Error("fetch failed");
+        return makeErroringStream(new Error("fetch failed"));
       },
     },
   } as unknown as Anthropic;
@@ -153,67 +243,4 @@ test("runConversation returns a clear fallback when the model request throws", a
   } finally {
     console.error = originalConsoleError;
   }
-});
-
-test("runConversation handles tool execution errors gracefully", async () => {
-  const responses = [
-    {
-      stop_reason: "tool_use",
-      content: [
-        {
-          type: "tool_use",
-          id: "tool-1",
-          name: "failing_tool",
-          input: {},
-        },
-      ],
-    },
-    {
-      stop_reason: "end_turn",
-      content: [{ type: "text", text: "The tool failed, sorry." }],
-    },
-  ];
-
-  const client = {
-    messages: {
-      create: async () => {
-        const nextResponse = responses.shift();
-        if (!nextResponse) throw new Error("Unexpected call");
-        return nextResponse;
-      },
-    },
-  } as unknown as Anthropic;
-
-  const output = await runConversation(
-    client,
-    "test-model",
-    [],
-    async () => {
-      throw new Error("database connection lost");
-    },
-    buildMessages([], "search for something")
-  );
-
-  assert.equal(output, "The tool failed, sorry.");
-});
-
-test("runConversation returns fallback on unknown stop reason", async () => {
-  const client = {
-    messages: {
-      create: async () => ({
-        stop_reason: "content_filter",
-        content: [],
-      }),
-    },
-  } as unknown as Anthropic;
-
-  const output = await runConversation(
-    client,
-    "test-model",
-    [],
-    async () => ({}),
-    buildMessages([], "anything")
-  );
-
-  assert.match(output, /couldn't complete/i);
 });

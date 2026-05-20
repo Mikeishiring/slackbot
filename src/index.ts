@@ -28,6 +28,9 @@ export async function main(
   await startSlackBot({
     botToken: config.slackBotToken,
     appToken: config.slackAppToken,
+    ...(config.slackAllowedChannels
+      ? { allowedChannels: config.slackAllowedChannels }
+      : {}),
     onMessage: agent.respond,
   });
 }
