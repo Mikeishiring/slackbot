@@ -47,18 +47,20 @@ Key files:
 - `data/sample-data.json` — starter dataset
 - `manifest.json` — Slack app manifest; source of truth for scopes and events
 - `.env.example` — environment template
-- `test/` — contract tests for all six modules
+- `test/` — contract tests for agent, slack, tools, format, and config
 - `test/tools.example.test.ts` — copyable template using `setItemSource()`
 
 Runtime expectations:
 
-- Node.js 20+ (enforced via `engines` in `package.json`; CI runs 20, 22, and 24)
+- Node.js 22+ (enforced via `engines` in `package.json`; CI runs 22 and 24)
 - Socket Mode only
 - No inbound webhook server or public URL required
 
-`npm test` pins its glob to `test/*.test.ts`. Keep it pinned — Node's default
-test-file discovery widened in Node 22 and started collecting
-`scripts/test-live.ts`, which needs live credentials.
+`npm test` passes an explicit glob (`test/**/*.test.ts`). Keep it explicit:
+Node's default discovery collects `scripts/test-live.ts` (it matches `test-*`),
+which needs live credentials. The glob also requires Node 22+ — Node 20's runner
+treats it as a literal path, and in fact discovers no `.ts` test files under any
+invocation, exiting 0 having run nothing. That is why `engines` is `>=22`.
 
 Supported Slack surfaces by default:
 
@@ -137,20 +139,17 @@ Fill `.env` with the Slack and Anthropic credentials before starting.
 
 In Slack app settings:
 
-1. Create the app from scratch.
-2. Enable Socket Mode.
-3. Generate an app token starting with `xapp-`.
-4. Add bot scopes:
-   - `app_mentions:read`
-   - `chat:write`
-   - `channels:history`
-   - `reactions:write`
-   - `im:history`
-5. Subscribe to bot events:
-   - `app_mention`
-   - `message.im`
-6. Install the app to the workspace.
-7. Copy the bot token starting with `xoxb-`.
+1. **Create New App -> From a manifest**, then paste `manifest.json` from the repo
+   root. It sets Socket Mode, all five bot scopes, and both bot events in one step.
+   Do not enumerate scopes by hand — `manifest.json` is the source of truth, and
+   the README defers to it too.
+2. **Basic Information -> App-Level Tokens**: generate one with `connections:write`
+   (starts with `xapp-`).
+3. **Install to Workspace**, then copy the bot token (starts with `xoxb-`).
+
+For channel-only mode, remove `im:history` and `message.im` from the manifest
+before pasting. If you change scopes, update the README security table in the
+same commit.
 
 Important:
 

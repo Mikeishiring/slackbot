@@ -47,17 +47,22 @@ export async function main(
     onMessage: agent.respond,
   });
 
-  // Extra Slack surfaces go here — no need to edit slack.ts:
+  // Extra Slack surfaces go here — no need to edit slack.ts. Note the
+  // toSlackMrkdwn call: any reply you send yourself needs the same markdown
+  // translation the built-in reply path applies, or **bold** renders literally.
+  //
+  //   import { toSlackMrkdwn } from "./format.js";
   //
   //   bot.app.command("/ask", async ({ command, ack, respond }) => {
   //     await ack();
   //     const answer = await agent.respond({
   //       text: command.text,
   //       history: [],
-  //       context: { channelId: command.channel_id, threadTs: command.trigger_id,
+  //       // No thread for a slash command, so scope the context to the channel.
+  //       context: { channelId: command.channel_id, threadTs: command.channel_id,
   //                  userId: command.user_id },
   //     });
-  //     await respond(answer);
+  //     await respond(toSlackMrkdwn(answer));
   //   });
 
   registerShutdownHandlers(async () => {

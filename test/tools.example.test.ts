@@ -2,7 +2,7 @@
  * TEMPLATE — copy this file when you replace the sample data with your own.
  *
  * `setItemSource` swaps the data source for a fixture, so these tests keep
- * passing after you point `loadItems()` at Postgres or an API. No live
+ * passing after you point `loadSampleFile()` at Postgres or an API. No live
  * database, no network, no mocking library.
  */
 

@@ -21,9 +21,9 @@ Clone. Set 3 keys. Run.
 - **Thread context** — follow-up questions work naturally. The bot reads the most recent thread history before responding, and correctly tells its own past replies apart from other bots' messages.
 - **Tool loop** — Claude picks the right tool, reads the results, and replies. Up to 10 model turns per message, with oversized tool payloads truncated so one big result can't crowd out the conversation.
 - **Slack-safe formatting** — markdown is translated to Slack's dialect, and code spans and fenced blocks pass through untouched so `**pointers**` and `x ** 2` survive intact.
-- **Long-response chunking** — answers longer than Slack's 3,500-char message limit auto-split on paragraph boundaries and post as a chain of replies in the same thread.
+- **Long-response chunking** — answers longer than 3,500 characters auto-split on paragraph boundaries and post as a chain of replies in the same thread. (That's our margin, not Slack's hard cap — it keeps replies clear of truncation.)
 - **Duplicate-event protection** — Slack redelivers events when a socket reconnects. Repeats are dropped instead of producing a second reply.
-- **Clean shutdown** — SIGTERM/SIGINT close the socket before exiting, so a redeploy doesn't strand an in-flight message.
+- **Clean shutdown** — SIGTERM/SIGINT close the Socket Mode connection and release tool resources (DB pools) before exiting, instead of dropping the process mid-request.
 - **Optional channel allowlist** — set `SLACK_ALLOWED_CHANNELS` to restrict @-mention responses to specific channels (DMs always allowed). Defense against accidental exposure if the bot is invited somewhere unexpected.
 - **Single config source** — model, timeout, and retry defaults live in one place. No drift between files.
 
@@ -157,7 +157,7 @@ npm start
 
 Expected: the bot replies in a thread using the sample dataset.
 
-`npm run check` runs the typechecker and the test suite locally. Node 20 or newer.
+`npm run check` runs the typechecker and the test suite locally. Requires Node 22 or newer — earlier versions' test runners don't discover TypeScript test files.
 
 <details>
 <summary>🤖 <strong>Agent / automated setup</strong> (Claude Code, Cursor, Codex)</summary>
@@ -190,7 +190,7 @@ If you're using an AI coding agent to set this up:
   └── config.ts        → Env vars, defaults, validation
 📁 data/
   └── sample-data.json → Starter dataset (swap this out)
-📁 test/               → Contract tests for all 6 modules
+📁 test/               → Contract tests (agent, slack, tools, format, config)
   └── tools.example.test.ts → 📋 copy this when you swap the data source
 📄 manifest.json       → Slack app manifest — paste to create the app
 📄 .env.example        → Template — copy to .env and fill in
@@ -397,7 +397,7 @@ In channels, it reads history only where it's been invited.
 
 ### What this bot does NOT do
 
-- It does **not** access private channels (no `groups:history` scope)
+- It does **not** read history in private channels (no `groups:history` scope). Note it *will* still answer a direct @mention in a private channel it's been invited to — it just answers without thread context. Don't invite it where that isn't wanted.
 - It does **not** manage channels, users, or workspace settings
 - It does **not** store messages — thread history is fetched on demand and discarded after the response
 - It does **not** have a database — it's completely stateless
@@ -569,4 +569,4 @@ Deliberate omissions, so you don't go looking:
 
 ## 📝 Notes
 
-This repo is intentionally small. The only file you need to change is `src/tools.ts` — swap the sample JSON for your database, API, or MCP server and ship it.
+This repo is intentionally small. Two files are yours: swap the sample JSON in `src/tools.ts` for your database, API, or MCP server, set the persona in `.env` or `src/index.ts`, and ship it.
