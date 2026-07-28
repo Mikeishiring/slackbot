@@ -6,7 +6,7 @@
  * one is a compile error rather than a wrong answer at runtime.
  *
  * To make this bot yours, you change two things here:
- *   1. `loadItems()` — point it at your database, API, or file
+ *   1. `loadSampleFile()` — point it at your database, API, or file
  *   2. The tool list — what your team can ask for
  *
  * Every tool's `run` receives a `ToolContext` (who asked, which channel,

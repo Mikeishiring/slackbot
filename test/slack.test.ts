@@ -12,7 +12,6 @@ import {
   isChannelAllowed,
   MAX_CHUNK_SIZE,
   normalizeMentionText,
-  shouldHandleDirectMessage,
   truncateForStream,
   WORKING_REACTION,
   type IncomingMessage,
@@ -43,17 +42,6 @@ test("classifyDirectMessage handles, ignores, or flags attachments", () => {
   assert.equal(
     classifyDirectMessage({ ...base, subtype: "file_share", bot_id: "B1" }),
     "ignore"
-  );
-});
-
-test("shouldHandleDirectMessage narrows only the handle disposition", () => {
-  assert.equal(
-    shouldHandleDirectMessage({ channel_type: "im", channel: "D1", ts: "1", text: "hi" }),
-    true
-  );
-  assert.equal(
-    shouldHandleDirectMessage({ channel_type: "im", channel: "D1", ts: "1", subtype: "file_share" }),
-    false
   );
 });
 

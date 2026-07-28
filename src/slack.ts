@@ -24,14 +24,19 @@ export const PLACEHOLDER_TEXT = "…";
 /** The emoji shown while the bot is working. */
 export const WORKING_REACTION = "eyes";
 /**
- * `conversations.replies` pages forward from the thread parent, so a small
- * limit returns the *oldest* messages. Fetch a wide window and keep the tail.
- * How much of that tail reaches the model is agent.ts's
- * MAX_THREAD_HISTORY_MESSAGES — that is the limit that binds.
+ * `conversations.replies` pages forward from the thread parent, so this single
+ * page is the *oldest* 100 replies — there is no pagination here. For threads
+ * under 100 messages that is the whole thread, which covers normal use; past
+ * that, the newest messages are not fetched. How much of what we do fetch
+ * reaches the model is agent.ts's MAX_THREAD_HISTORY_MESSAGES.
  */
 export const THREAD_FETCH_LIMIT = 100;
 export const STREAM_UPDATE_INTERVAL_MS = 1_500;
-/** Slack rejects messages longer than this. */
+/**
+ * Our own safety margin, not a Slack limit — `chat.postMessage` accepts more
+ * (4,000 chars is the practical ceiling). Splitting below it keeps replies
+ * comfortably clear of truncation.
+ */
 export const MAX_CHUNK_SIZE = 3_500;
 /** Slack redelivers events on reconnect; remember recent ones to stay idempotent. */
 export const DEDUPE_TTL_MS = 10 * 60 * 1_000;
@@ -610,12 +615,6 @@ export function classifyDirectMessage(event: unknown): DirectMessageDisposition 
   if (event.subtype) return "ignore";
 
   return "handle";
-}
-
-export function shouldHandleDirectMessage(
-  event: unknown
-): event is DirectMessageEvent {
-  return classifyDirectMessage(event) === "handle";
 }
 
 function isMentionEvent(event: unknown): event is MentionEvent {

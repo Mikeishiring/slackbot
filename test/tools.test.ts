@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { ToolContext } from "../src/agent.js";
-import { runTool, tools } from "../src/tools.js";
+import { runTool, tools, type LocalTool } from "../src/tools.js";
 
 const CTX: ToolContext = { channelId: "C1", threadTs: "1.0", userId: "U_HUMAN" };
 
@@ -136,14 +136,18 @@ test("runTool rejects non-string tag values", async () => {
   );
 });
 
-test("every advertised tool is dispatchable", async () => {
-  // The definition list and the dispatch table are derived from one source,
-  // so an advertised tool can never lack an implementation. This asserts that
-  // invariant holds rather than trusting it.
-  const names = tools.map((tool) => ("name" in tool ? tool.name : undefined));
-  assert.ok(names.length > 0);
+test("every locally-implemented tool is dispatchable", async () => {
+  // Local tools carry schema and `run` in one value, so an advertised local
+  // tool cannot lack an implementation. Anthropic-hosted entries in
+  // SERVER_TOOLS are deliberately absent from the dispatch table — they run
+  // on Anthropic's side — so they're excluded here by their `type` tag.
+  const localNames = tools
+    .filter((tool) => !("type" in tool))
+    .map((tool) => ("name" in tool ? tool.name : undefined));
 
-  for (const name of names) {
+  assert.ok(localNames.length > 0, "expected at least one local tool");
+
+  for (const name of localNames) {
     assert.ok(name, "every tool should expose a name");
     await assert.doesNotReject(
       async () => {
@@ -161,13 +165,32 @@ test("every advertised tool is dispatchable", async () => {
   }
 });
 
-test("runTool hands the context to the tool", async () => {
-  // Proves the authorization seam: a tool can see who is asking.
-  const result = (await runTool(
-    "search_items",
-    { query: "roadmap" },
-    { channelId: "C_X", threadTs: "9.9", userId: "U_BOB" }
-  )) as unknown[];
+test("runTool rejects a server-tool name rather than pretending to run it", async () => {
+  // Guards the recipe in tools.ts: uncommenting a SERVER_TOOLS entry must not
+  // make `runTool` claim to handle it locally.
+  await assert.rejects(
+    () => runTool("web_search", {}, CTX),
+    /Unknown tool: web_search/
+  );
+});
 
-  assert.ok(Array.isArray(result));
+test("a LocalTool receives the context as its second argument", () => {
+  // Documents the contract users implement when they gate a tool. This checks
+  // the LocalTool shape, not the dispatcher — runConversation -> runTool is
+  // covered in test/agent.test.ts, and the gate pattern in tools.example.test.ts.
+  const seen: ToolContext[] = [];
+  const probe: LocalTool = {
+    name: "context_probe",
+    description: "test-only",
+    inputSchema: { type: "object", properties: {} },
+    run: (_input, context) => {
+      seen.push(context);
+      return { ok: true };
+    },
+  };
+
+  const ctx: ToolContext = { channelId: "C_X", threadTs: "9.9", userId: "U_BOB" };
+  probe.run({}, ctx);
+
+  assert.deepEqual(seen, [ctx]);
 });

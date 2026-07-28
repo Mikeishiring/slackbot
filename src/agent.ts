@@ -200,7 +200,7 @@ export function buildMessages(
   history: HistoryMessage[],
   text: string
 ): MessageParam[] {
-  const trimmed = history
+  const trimmed: MessageParam[] = history
     .slice(-MAX_THREAD_HISTORY_MESSAGES)
     .flatMap((message) => {
       const content = normalizeMessageText(
@@ -209,6 +209,13 @@ export function buildMessages(
       );
       return content ? [{ role: message.role, content }] : [];
     });
+
+  // The API requires the first message to be a user turn. The trim window can
+  // easily open on one of our own replies in a long thread, and consecutive
+  // same-role turns are fine — only a leading assistant turn is a 400.
+  while (trimmed[0]?.role === "assistant") {
+    trimmed.shift();
+  }
 
   const latestText =
     normalizeMessageText(text, MAX_USER_MESSAGE_CHARS) || "(empty message)";

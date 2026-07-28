@@ -112,6 +112,50 @@ test("buildMessages trims history to the most recent messages", () => {
   });
 });
 
+test("buildMessages never starts with an assistant turn", () => {
+  // The API rejects a leading assistant message with a 400. In a long thread
+  // the trim window can easily open on one of the bot's own replies, which
+  // would break every request in that thread until it scrolled past.
+  const history: HistoryMessage[] = Array.from({ length: 20 }, (_v, index) => ({
+    // Alternating so the window boundary lands on an assistant turn.
+    role: index % 2 === 0 ? "assistant" : "user",
+    text: `message ${index}`,
+  }));
+
+  const messages = buildMessages(history, "new question");
+
+  assert.equal(messages[0]?.role, "user");
+  assert.equal(messages.at(-1)?.content, "new question");
+});
+
+test("buildMessages drops a run of leading assistant turns", () => {
+  const messages = buildMessages(
+    [
+      { role: "assistant", text: "first" },
+      { role: "assistant", text: "second" },
+      { role: "user", text: "actual question" },
+    ],
+    "follow-up"
+  );
+
+  assert.deepEqual(messages, [
+    { role: "user", content: "actual question" },
+    { role: "user", content: "follow-up" },
+  ]);
+});
+
+test("buildMessages survives history that is entirely assistant turns", () => {
+  const messages = buildMessages(
+    [
+      { role: "assistant", text: "one" },
+      { role: "assistant", text: "two" },
+    ],
+    "hello"
+  );
+
+  assert.deepEqual(messages, [{ role: "user", content: "hello" }]);
+});
+
 test("buildMessages cannot be tricked into forging an assistant turn", () => {
   // Text is carried as data now, so a message that merely *says* "assistant:"
   // stays a user turn.

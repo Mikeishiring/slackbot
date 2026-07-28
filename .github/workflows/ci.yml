@@ -12,11 +12,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Node's default test-file globbing has widened across releases, and
-        # `engines` allows 20+. Run the range so a version-specific break in
+        # Node 22 is the floor: earlier runners discover no .ts test files
+        # at all (they exit 0 having run nothing) and don't accept glob
+        # arguments. Run the supported range so a version-specific break in
         # the test runner or the SDK shows up here, not on a contributor's
         # machine.
-        node-version: [20, 22, 24]
+        node-version: [22, 24]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
