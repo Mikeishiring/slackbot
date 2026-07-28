@@ -1,0 +1,36 @@
+{
+  "_comment": "Slack app manifest. Paste into api.slack.com/apps -> Create New App -> From a manifest. This is the source of truth for scopes and events; the README defers to it. For channel-only mode, remove im:history and message.im.",
+  "display_information": {
+    "name": "Data Bot",
+    "description": "Ask questions about your team's data in plain English.",
+    "background_color": "#4a154b"
+  },
+  "features": {
+    "bot_user": {
+      "display_name": "Data Bot",
+      "always_online": true
+    }
+  },
+  "oauth_config": {
+    "scopes": {
+      "bot": [
+        "app_mentions:read",
+        "chat:write",
+        "channels:history",
+        "reactions:write",
+        "im:history"
+      ]
+    }
+  },
+  "settings": {
+    "event_subscriptions": {
+      "bot_events": ["app_mention", "message.im"]
+    },
+    "interactivity": {
+      "is_enabled": true
+    },
+    "org_deploy_enabled": false,
+    "socket_mode_enabled": true,
+    "token_rotation_enabled": false
+  }
+}

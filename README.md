@@ -18,9 +18,12 @@ Clone. Set 3 keys. Run.
 
 - **Word-overlap search** — natural queries like "series b funding" find the right items, not just exact substrings. Title matches rank higher.
 - **👀 Processing indicator + streaming replies** — the bot reacts with :eyes: the instant your message arrives, posts a placeholder reply, then streams Claude's text into it as it's generated. Two signals: "I see you" and "answer forming now."
-- **Thread context** — follow-up questions work naturally. The bot reads thread history before responding.
-- **Tool loop** — Claude picks the right tool, reads the results, and replies. Up to 10 tool calls per message.
+- **Thread context** — follow-up questions work naturally. The bot reads the most recent thread history before responding, and correctly tells its own past replies apart from other bots' messages.
+- **Tool loop** — Claude picks the right tool, reads the results, and replies. Up to 10 model turns per message, with oversized tool payloads truncated so one big result can't crowd out the conversation.
+- **Slack-safe formatting** — markdown is translated to Slack's dialect, and code spans and fenced blocks pass through untouched so `**pointers**` and `x ** 2` survive intact.
 - **Long-response chunking** — answers longer than Slack's 3,500-char message limit auto-split on paragraph boundaries and post as a chain of replies in the same thread.
+- **Duplicate-event protection** — Slack redelivers events when a socket reconnects. Repeats are dropped instead of producing a second reply.
+- **Clean shutdown** — SIGTERM/SIGINT close the socket before exiting, so a redeploy doesn't strand an in-flight message.
 - **Optional channel allowlist** — set `SLACK_ALLOWED_CHANNELS` to restrict @-mention responses to specific channels (DMs always allowed). Defense against accidental exposure if the bot is invited somewhere unexpected.
 - **Single config source** — model, timeout, and retry defaults live in one place. No drift between files.
 
@@ -45,14 +48,18 @@ graph LR
 
 Someone messages your bot. Claude figures out what they're asking, calls the right tool, gets data back, and replies in the thread. You decide what tools exist and what data they can access.
 
-**4 files, 1 extension point:**
+**Six files. Two are yours:**
 
 | File | What it does |
 |------|-------------|
-| `src/slack.ts` | Receives messages, posts replies |
-| `src/agent.ts` | Claude API + tool loop |
-| `src/tools.ts` | **Your tools — the one file you customize** |
-| `src/config.ts` | Environment variables + defaults |
+| `src/tools.ts` | **Yours** — your data and what the team can ask for. Start here. |
+| `src/index.ts` | **Yours** — wiring and policy: persona, shutdown, extra Slack handlers. |
+| `src/slack.ts` | The machine: Socket Mode, threads, streaming, chunking |
+| `src/agent.ts` | The machine: Claude loop, contracts, model invariants |
+| `src/format.ts` | The machine: markdown → Slack mrkdwn |
+| `src/config.ts` | The machine: env parsing + exported defaults |
+
+Everything the bot can *do* is defined in the two files marked yours. That's also the review rule: a diff touching the other four deserves a second look.
 
 ---
 
@@ -102,21 +109,15 @@ graph LR
 
 ### Step 1: Create a Slack App
 
-1. Go to [api.slack.com/apps](https://api.slack.com/apps) → **Create New App** → **From Scratch**
-2. Name it whatever you want, pick your workspace
-3. **Socket Mode** → toggle on → generate an app token (starts with `xapp-`)
-4. **OAuth & Permissions** → add bot scopes:
-   - `app_mentions:read` — see when someone @mentions the bot
-   - `chat:write` — post replies
-   - `channels:history` — read thread history for context
-   - `reactions:write` — add/remove the 👀 processing indicator
-   - `im:history` — read DMs *(skip this for channel-only mode)*
-5. **Install to Workspace** → copy the bot token (starts with `xoxb-`)
-6. **Event Subscriptions** → toggle on → subscribe to:
-   - `app_mention` — someone @mentions the bot
-   - `message.im` — someone DMs the bot *(skip for channel-only)*
+1. Go to [api.slack.com/apps](https://api.slack.com/apps) → **Create New App** → **From a manifest**
+2. Pick your workspace, then paste the contents of [`manifest.json`](manifest.json)
+3. **Basic Information** → **App-Level Tokens** → generate one with `connections:write` (starts with `xapp-`)
+4. **Install to Workspace** → copy the bot token (starts with `xoxb-`)
+
+That's it — the manifest sets Socket Mode, all five scopes, and both events in one shot. `manifest.json` is the source of truth for what the bot can read; see [Security](#-security) for what each scope allows.
 
 > **Changed scopes or events?** Reinstall the app to the workspace.
+> **Channel-only (no DMs)?** Remove `im:history` and `message.im` from the manifest before pasting.
 > **Want private channels?** Add `groups:history`, reinstall, and invite the bot.
 
 ### Step 2: Get an Anthropic Key
@@ -156,7 +157,7 @@ npm start
 
 Expected: the bot replies in a thread using the sample dataset.
 
-`npm run check` runs linting and tests locally.
+`npm run check` runs the typechecker and the test suite locally. Node 20 or newer.
 
 <details>
 <summary>🤖 <strong>Agent / automated setup</strong> (Claude Code, Cursor, Codex)</summary>
@@ -181,14 +182,17 @@ If you're using an AI coding agent to set this up:
 
 ```
 📁 src/
-  ├── index.ts         → Entry point — wires everything together
-  ├── config.ts        → Env vars, defaults, validation
-  ├── slack.ts         → Socket Mode connection + thread history
-  ├── agent.ts         → Claude API + tool loop (max 10 calls)
-  └── tools.ts         → ⭐ YOUR TOOLS — start here
+  ├── tools.ts         → ⭐ YOURS — your data + your tools. Start here.
+  ├── index.ts         → ⭐ YOURS — wiring, persona, extra Slack handlers
+  ├── slack.ts         → Socket Mode, thread history, streaming, chunking
+  ├── agent.ts         → Claude loop + the contracts the app speaks
+  ├── format.ts        → markdown → Slack mrkdwn
+  └── config.ts        → Env vars, defaults, validation
 📁 data/
   └── sample-data.json → Starter dataset (swap this out)
-📁 test/               → Contract tests for all 4 modules
+📁 test/               → Contract tests for all 6 modules
+  └── tools.example.test.ts → 📋 copy this when you swap the data source
+📄 manifest.json       → Slack app manifest — paste to create the app
 📄 .env.example        → Template — copy to .env and fill in
 ```
 
@@ -242,7 +246,20 @@ graph TD
     style F fill:#065f46,color:#fff,stroke:none
 ```
 
-Open `src/tools.ts` and swap the sample data for your real source.
+Open `src/tools.ts` and swap the sample data for your real source. Every recipe below is a change in one of your two files — nothing else moves.
+
+| I want to… | Where | How |
+|---|---|---|
+| Point at my own data | `tools.ts` → `loadSampleFile` | Replace the body. It's `async`, so a query or `fetch` drops in. |
+| Add a capability | `tools.ts` → `LOCAL_TOOLS` | Add one `LocalTool` object — schema and `run` together. |
+| Change the persona | `.env` → `ANTHROPIC_SYSTEM_PROMPT_APPEND` | One line. Longer personas go in `index.ts` as `systemPromptAppend`. |
+| Restrict a tool to certain people | `tools.ts` → that tool's `run` | `if (!ALLOWED.has(context.userId ?? "")) return { error: "Not authorized" };` |
+| Log usage or cost per user | `tools.ts` → that tool's `run` | `context` carries `userId`, `channelId`, `threadTs`. |
+| Add a slash command | `index.ts` | `bot.app.command(...)` — a commented example is in the file. |
+| Let it search the web | `tools.ts` → `SERVER_TOOLS` | Uncomment the `web_search` line. No implementation needed. |
+| Close a DB pool on exit | `tools.ts` → `closeTools` | Called automatically on SIGTERM/SIGINT. |
+
+**Test your tools without a live database.** Copy [`test/tools.example.test.ts`](test/tools.example.test.ts) — it uses `setItemSource()` to swap in a fixture, so your tests keep passing after you switch to Postgres.
 
 **Connect a database:**
 ```typescript
@@ -307,7 +324,7 @@ graph LR
     style H fill:#92400e,color:#fff,stroke:none
 ```
 
-The key thing: `agent.ts` never changes. It imports `tools` and `runTool` from whatever you give it — one file, a folder of files, or a mix of local tools and external MCP servers. You can keep adding capabilities without touching the core.
+The key thing: `slack.ts`, `agent.ts`, `format.ts`, and `config.ts` never change. `agent.ts` imports `tools` and `runTool` from whatever you give it — one file, a folder of files, or a mix of local tools and external MCP servers. Persona and policy go in `index.ts`; data and capabilities go in `tools.ts`.
 
 When you outgrow a single file, split `tools.ts` into a `tools/` folder. When you want to connect external services, add MCP servers alongside your local tools. The bot doesn't care where the tools come from.
 
@@ -358,22 +375,28 @@ Read this before deploying. This bot runs code that has the Slack permissions yo
 | `chat:write` | Post messages to any channel the bot is in |
 | `channels:history` | Read message history in public channels the bot is in |
 | `reactions:write` | Add/remove emoji reactions (used for 👀 processing indicator) |
+| `im:history` | **Read direct messages sent to the bot** |
 
-That's it. The bot ships with these scopes and nothing more.
+These five are what [`manifest.json`](manifest.json) requests. `im:history` is what makes DMs work — remove it and the `message.im` event for channel-only mode.
 
 ### The trust model
 
 When you deploy this bot, you're trusting three things:
 
-**The code in this repo.** `tools.ts` defines what the bot actually does. Anyone with write access to the repo or the deployment can change what happens when the bot is mentioned. A malicious change to `tools.ts` could make the bot read channel history and exfiltrate it, post misleading messages, or misuse the Slack API. Audit `tools.ts` before deploying — it's the only file that should change.
+**The code in this repo.** `tools.ts` and `index.ts` define what the bot actually does. Anyone with write access to the repo or the deployment can change what happens when the bot is mentioned. A malicious change to either could make the bot read channel history and exfiltrate it, post misleading messages, or misuse the Slack API. Audit both before deploying — they're the two files that should change.
 
 **The Anthropic API.** Claude processes your Slack messages. Anything said to the bot goes through Anthropic's API. Review their [data usage policy](https://www.anthropic.com/policies).
 
 **Your deployment platform.** Whoever has access to your Railway/hosting environment can see your tokens and modify the running code.
 
+### What it DOES read
+
+**It reads direct messages sent to it.** With the default manifest, anything DM'd to the bot is sent to the Anthropic API — and `SLACK_ALLOWED_CHANNELS` does **not** apply to DMs. If that isn't what you want, drop `im:history` and the `message.im` event.
+
+In channels, it reads history only where it's been invited.
+
 ### What this bot does NOT do
 
-- It does **not** read DMs (no `im:history` scope)
 - It does **not** access private channels (no `groups:history` scope)
 - It does **not** manage channels, users, or workspace settings
 - It does **not** store messages — thread history is fetched on demand and discarded after the response
@@ -412,11 +435,11 @@ graph TB
     style I fill:#DC2626,color:#fff,stroke:none
 ```
 
-**1. Audit `tools.ts` before deploying.** It's the only file that should change. If you see modifications to `slack.ts`, `agent.ts`, or `index.ts` in a PR, understand why before merging.
+**1. Audit `tools.ts` and `index.ts` before deploying.** Both are about one screen. Everything the bot can do is defined there. A diff to `slack.ts`, `agent.ts`, `format.ts`, or `config.ts` is a red flag — understand why before merging.
 
 **2. Limit channel access.** Only invite the bot to channels where you want it. It can only read history in channels it's been invited to.
 
-**3. Use minimal scopes.** This bot intentionally does not request `im:history` (DMs) or `groups:history` (private channels). If you don't need a scope, don't add it. Security here is about omission — you secure it by not granting access, not by configuring something extra.
+**3. Use minimal scopes.** This bot does not request `groups:history` (private channels). If you only need channel mentions, drop `im:history` and `message.im` from [`manifest.json`](manifest.json) too. Security here is about omission — you secure it by not granting access, not by configuring something extra.
 
 **4. Rotate tokens if you suspect compromise.** Revoke and regenerate both the bot token and app token from [api.slack.com/apps](https://api.slack.com/apps).
 
@@ -468,15 +491,50 @@ npm start
 
 ## ⚙️ Environment Variables
 
-| Variable | Required | Default |
-|----------|----------|---------|
-| `SLACK_BOT_TOKEN` | Yes | — |
-| `SLACK_APP_TOKEN` | Yes | — |
-| `ANTHROPIC_API_KEY` | Yes | — |
-| `ANTHROPIC_MODEL` | No | `claude-opus-4-20250918` |
-| `ANTHROPIC_REQUEST_TIMEOUT_MS` | No | `15000` |
-| `ANTHROPIC_MAX_RETRIES` | No | `2` |
-| `SLACK_ALLOWED_CHANNELS` | No | — (any channel) |
+| Variable | Required | Default | Notes |
+|----------|----------|---------|-------|
+| `SLACK_BOT_TOKEN` | Yes | — | Starts with `xoxb-` |
+| `SLACK_APP_TOKEN` | Yes | — | Starts with `xapp-` |
+| `ANTHROPIC_API_KEY` | Yes | — | |
+| `ANTHROPIC_MODEL` | No | `claude-opus-5` | |
+| `ANTHROPIC_SYSTEM_PROMPT_APPEND` | No | — | Adds your context to the prompt. One-liners only — see note below. |
+| `ANTHROPIC_MAX_TOKENS` | No | `16000` | Caps thinking + reply together |
+| `ANTHROPIC_EFFORT` | No | `medium` | `low` \| `medium` \| `high` \| `xhigh` \| `max` |
+| `ANTHROPIC_REQUEST_TIMEOUT_MS` | No | `120000` | Per attempt, not per message |
+| `ANTHROPIC_MAX_RETRIES` | No | `2` | |
+| `SLACK_ALLOWED_CHANNELS` | No | — (any channel) | Comma-separated channel IDs |
+
+### Tuning cost and speed
+
+`ANTHROPIC_EFFORT` is the main dial. The model thinks before it answers, and effort controls how much:
+
+- **`low`** — fastest and cheapest. Handles most "look this up and tell me" questions well.
+- **`medium`** (default) — a good balance for a bot that has to pick tools and read results.
+- **`high` / `xhigh` / `max`** — for genuinely hard questions. Slower and more expensive; `max` can overthink simple lookups.
+
+Start at the default, drop to `low` if replies feel slow, and raise it only if answers come back shallow.
+
+> **Don't disable thinking to save money — lower the effort instead.** With thinking off, this model will occasionally write a tool call as plain text instead of actually calling the tool, and the bot will answer confidently without ever having looked anything up.
+
+### Setting the persona
+
+`ANTHROPIC_SYSTEM_PROMPT_APPEND` adds your context after the shipped prompt:
+
+```
+ANTHROPIC_SYSTEM_PROMPT_APPEND=You support the Acme billing team. Prices are in USD.
+```
+
+> **Keep it to a sentence or two.** `dotenv` drops unquoted newlines, so a multi-paragraph persona in `.env` loads silently truncated. For anything longer, pass `systemPromptAppend` in `index.ts` instead — or `systemPrompt` to replace the prompt entirely, after reading the note on `DEFAULT_SYSTEM_PROMPT` in `agent.ts` about the one paragraph worth keeping.
+
+### Not supported
+
+Deliberate omissions, so you don't go looking:
+
+- **HTTP mode** — Socket Mode only. No `SLACK_SIGNING_SECRET`, no public URL.
+- **Serverless / Lambda** — the WebSocket, signal handlers, and streaming edits all assume a long-running process. It's a rewrite, not a config flag.
+- **Block Kit output** — the reply path is a string end to end (streamed, then chunked on characters). Rich layouts would be a second write path.
+- **Images and files** — DMs with attachments get an honest "I can't read files yet" reply rather than silence.
+- **Native MCP** — `mcp_servers` lives on `client.beta.messages`, so the cheap path would mean editing `agent.ts`. Wrap an MCP client as a tool in `tools.ts` instead.
 
 ---
 
@@ -498,9 +556,13 @@ npm start
 |---------|-----|
 | Bot doesn't respond | Check scopes + event subscriptions. Reinstall app after changes. |
 | `Bot is running` but no replies | Invite the bot: `/invite @YourBotName` |
-| `not_found_error` on model | Check `ANTHROPIC_MODEL` is a valid model ID |
+| `not_found_error` on model | `ANTHROPIC_MODEL` isn't a valid ID, or the model was retired. Clear it to use the default. |
 | Socket keeps disconnecting | Check `SLACK_APP_TOKEN` starts with `xapp-` |
-| High API costs | Set spend cap in Anthropic Console. Reduce tool response sizes. |
+| Replies cut off mid-sentence | Raise `ANTHROPIC_MAX_TOKENS` — it covers thinking *and* the reply. |
+| Replies feel slow | Lower `ANTHROPIC_EFFORT` to `low`. Don't disable thinking. |
+| Answers ignore your data | Confirm the tool actually returns rows — at `low` effort with thinking off, tool calls can be skipped. |
+| `Failed to resolve bot user ID` in logs | Non-fatal. History attribution falls back to a heuristic; check the bot token is valid. |
+| High API costs | Set spend cap in Anthropic Console. Lower `ANTHROPIC_EFFORT`. Reduce tool response sizes. |
 | `Missing required environment variable` | Check `.env` has all 3 required vars filled in |
 
 ---

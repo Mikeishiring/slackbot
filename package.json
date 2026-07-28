@@ -6,12 +6,17 @@
   "scripts": {
     "start": "tsx src/index.ts",
     "dev": "tsx watch src/index.ts",
-    "test": "node --import tsx --test",
+    "test": "node --import tsx --test \"test/**/*.test.ts\"",
     "typecheck": "tsc --noEmit",
-    "check": "npm run typecheck && npm test"
+    "check": "npm run typecheck && npm test",
+    "preview-format": "tsx scripts/preview-format.ts",
+    "test-live": "tsx scripts/test-live.ts"
+  },
+  "engines": {
+    "node": ">=20"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.39.0",
+    "@anthropic-ai/sdk": "^0.115.0",
     "@slack/bolt": "^4.1.0",
     "dotenv": "^17.2.3"
   },
