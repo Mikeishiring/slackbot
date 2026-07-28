@@ -1,6 +1,28 @@
-export const DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-20250514";
-export const DEFAULT_ANTHROPIC_REQUEST_TIMEOUT_MS = 15_000;
+export const DEFAULT_ANTHROPIC_MODEL = "claude-opus-5";
+/**
+ * Generous by design. Claude Opus 5 thinks before answering, so a single
+ * streamed turn can legitimately take a while. The SDK timeout is per attempt.
+ */
+export const DEFAULT_ANTHROPIC_REQUEST_TIMEOUT_MS = 120_000;
 export const DEFAULT_ANTHROPIC_MAX_RETRIES = 2;
+/**
+ * `max_tokens` caps thinking + visible text together. Leave headroom or a
+ * thinking-heavy turn truncates mid-answer.
+ */
+export const DEFAULT_ANTHROPIC_MAX_TOKENS = 16_000;
+/** Thinking depth and overall token spend. See ANTHROPIC_EFFORT in .env.example. */
+export const DEFAULT_ANTHROPIC_EFFORT = "medium";
+
+export const ANTHROPIC_EFFORT_LEVELS = [
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+] as const;
+
+export type AnthropicEffort = (typeof ANTHROPIC_EFFORT_LEVELS)[number];
+
 const LEGACY_ANTHROPIC_MAX_ATTEMPTS_ENV = "ANTHROPIC_MAX_ATTEMPTS" as const;
 
 export interface AppConfig {
@@ -11,12 +33,22 @@ export interface AppConfig {
   anthropicModel: string;
   anthropicRequestTimeoutMs: number;
   anthropicMaxRetries: number;
+  anthropicMaxTokens: number;
+  anthropicEffort: AnthropicEffort;
+  anthropicSystemPromptAppend?: string;
 }
 
 export function getConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const slackAllowedChannels = readChannelAllowlist(env, "SLACK_ALLOWED_CHANNELS");
+  // Deliberately has no DEFAULT_ constant: the shipped prompt lives in
+  // agent.ts, and duplicating a default here would give it two owners.
+  const anthropicSystemPromptAppend = readOptionalEnv(
+    env,
+    "ANTHROPIC_SYSTEM_PROMPT_APPEND"
+  );
 
   return {
+    ...(anthropicSystemPromptAppend ? { anthropicSystemPromptAppend } : {}),
     slackBotToken: readRequiredEnv(env, "SLACK_BOT_TOKEN"),
     slackAppToken: readRequiredEnv(env, "SLACK_APP_TOKEN"),
     ...(slackAllowedChannels ? { slackAllowedChannels } : {}),
@@ -33,6 +65,12 @@ export function getConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       ["ANTHROPIC_MAX_RETRIES", LEGACY_ANTHROPIC_MAX_ATTEMPTS_ENV],
       DEFAULT_ANTHROPIC_MAX_RETRIES
     ),
+    anthropicMaxTokens: readPositiveIntegerEnv(
+      env,
+      "ANTHROPIC_MAX_TOKENS",
+      DEFAULT_ANTHROPIC_MAX_TOKENS
+    ),
+    anthropicEffort: readEffortEnv(env, "ANTHROPIC_EFFORT"),
   };
 }
 
@@ -49,6 +87,29 @@ function readChannelAllowlist(
     .filter(Boolean);
 
   return channels.length > 0 ? new Set(channels) : undefined;
+}
+
+function readEffortEnv(
+  env: NodeJS.ProcessEnv,
+  name: keyof NodeJS.ProcessEnv
+): AnthropicEffort {
+  const value = readOptionalEnv(env, name);
+  if (!value) {
+    return DEFAULT_ANTHROPIC_EFFORT;
+  }
+
+  const normalized = value.toLowerCase();
+  if (!isEffortLevel(normalized)) {
+    throw new Error(
+      `${name} must be one of: ${ANTHROPIC_EFFORT_LEVELS.join(", ")}`
+    );
+  }
+
+  return normalized;
+}
+
+function isEffortLevel(value: string): value is AnthropicEffort {
+  return (ANTHROPIC_EFFORT_LEVELS as readonly string[]).includes(value);
 }
 
 function readRequiredEnv(

@@ -6,13 +6,15 @@
  * Run: npx tsx scripts/test-live.ts
  */
 
+import "dotenv/config";
+
 import { createAgent } from "../src/agent.js";
 import { tools, runTool } from "../src/tools.js";
 import { toSlackMrkdwn } from "../src/format.js";
 
 const apiKey = process.env.ANTHROPIC_API_KEY;
 if (!apiKey) {
-  console.error("ANTHROPIC_API_KEY is not set");
+  console.error("ANTHROPIC_API_KEY is not set (checked the environment and .env)");
   process.exit(1);
 }
 
@@ -38,7 +40,11 @@ for (const question of questions) {
 
   const start = Date.now();
   try {
-    const raw = await agent.respond(question, []);
+    const raw = await agent.respond({
+      text: question,
+      history: [],
+      context: { channelId: "C_LOCAL", threadTs: "0.0", userId: "U_LOCAL" },
+    });
     const elapsed = ((Date.now() - start) / 1000).toFixed(1);
 
     console.log(`\n[RAW — ${elapsed}s — what Claude emits]\n`);

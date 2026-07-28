@@ -1,15 +1,23 @@
 /**
- * Tools — what the LLM can do.
+ * Tools — what the LLM can do. THIS IS YOUR FILE.
  *
- * This is the only file you need to modify first.
+ * Each tool is one self-contained value: its schema and its implementation
+ * live together, so adding a tool is one object and forgetting to implement
+ * one is a compile error rather than a wrong answer at runtime.
  *
- * Two things live here:
- *   1. Tool DEFINITIONS — Claude reads these to know what it can call
- *   2. Tool IMPLEMENTATIONS — your code that actually runs when Claude calls a tool
+ * To make this bot yours, you change two things here:
+ *   1. `loadItems()` — point it at your database, API, or file
+ *   2. The tool list — what your team can ask for
+ *
+ * Every tool's `run` receives a `ToolContext` (who asked, which channel,
+ * which thread), so authorization, rate limiting, and audit logging are an
+ * `if` at the top of a tool — no core file changes.
  */
 
-import { readFileSync } from "fs";
-import type { Tool } from "@anthropic-ai/sdk/resources/messages.js";
+import { readFile } from "fs/promises";
+import type { Tool, ToolUnion } from "@anthropic-ai/sdk/resources/messages.js";
+
+import type { ToolContext } from "./agent.js";
 
 const DEFAULT_LIMIT = 10;
 const DEFAULT_RECENT_DAYS = 7;
@@ -17,94 +25,18 @@ const MAX_LIMIT = 50;
 const MAX_RECENT_DAYS = 3650;
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
-export const tools: Tool[] = [
-  {
-    name: "search_items",
-    description:
-      "Search the knowledge base by keyword. Returns matching items with title, date, source, and summary. Use this when someone asks about a topic, company, or concept.",
-    input_schema: {
-      type: "object" as const,
-      properties: {
-        query: {
-          type: "string",
-          description: "Search term — a keyword, name, or phrase",
-        },
-        tag: {
-          type: "string",
-          description: "Optional tag to filter by (e.g. 'engineering', 'product')",
-        },
-        limit: {
-          type: "number",
-          description: "Max results to return (default 10)",
-        },
-      },
-      required: ["query"],
-    },
-  },
-  {
-    name: "get_item",
-    description:
-      "Get full details for a specific item by its ID. Use this when someone wants to read the full content of something found via search.",
-    input_schema: {
-      type: "object" as const,
-      properties: {
-        id: {
-          type: "string",
-          description: "The item ID",
-        },
-      },
-      required: ["id"],
-    },
-  },
-  {
-    name: "list_recent",
-    description:
-      "List the most recent items in the knowledge base. Use this when someone asks 'what's new' or 'what happened this week'.",
-    input_schema: {
-      type: "object" as const,
-      properties: {
-        days: {
-          type: "number",
-          description: "How many days back to look (default 7)",
-        },
-        limit: {
-          type: "number",
-          description: "Max results to return (default 10)",
-        },
-      },
-    },
-  },
-];
-
-export async function runTool(
-  name: string,
-  input: Record<string, unknown>
-): Promise<unknown> {
-  switch (name) {
-    case "search_items":
-      return searchItems(
-        readRequiredString(input.query, "query"),
-        readOptionalString(input.tag, "tag"),
-        readPositiveInteger(input.limit, DEFAULT_LIMIT, MAX_LIMIT, "limit")
-      );
-
-    case "get_item":
-      return getItem(readRequiredString(input.id, "id"));
-
-    case "list_recent":
-      return listRecent(
-        readPositiveInteger(
-          input.days,
-          DEFAULT_RECENT_DAYS,
-          MAX_RECENT_DAYS,
-          "days"
-        ),
-        readPositiveInteger(input.limit, DEFAULT_LIMIT, MAX_LIMIT, "limit")
-      );
-
-    default:
-      throw new Error(`Unknown tool: ${name}`);
-  }
+/**
+ * A tool Claude can call. `run` may be sync or async; whatever it returns is
+ * JSON-serialized and handed back to Claude (capped by MAX_TOOL_RESULT_CHARS).
+ */
+export interface LocalTool {
+  name: string;
+  description: string;
+  inputSchema: Tool["input_schema"];
+  run: (
+    input: Record<string, unknown>,
+    context: ToolContext
+  ) => unknown | Promise<unknown>;
 }
 
 interface Item {
@@ -119,12 +51,197 @@ interface Item {
 
 type ItemPreview = Omit<Item, "content">;
 
-function searchItems(
+// ---------------------------------------------------------------------------
+// Your data
+// ---------------------------------------------------------------------------
+
+/**
+ * REPLACE THIS BODY with your own source. It's async so a database or HTTP
+ * call drops straight in:
+ *
+ *   const { rows } = await pool.query("SELECT * FROM items");
+ *   return rows;
+ *
+ * If your source is remote, either drop the cache below or give it a TTL.
+ */
+async function loadSampleFile(): Promise<Item[]> {
+  const raw = await readFile(
+    new URL("../data/sample-data.json", import.meta.url),
+    "utf-8"
+  );
+
+  const parsed: unknown = JSON.parse(raw);
+  if (!Array.isArray(parsed)) {
+    throw new Error("sample-data.json must contain a JSON array of items");
+  }
+
+  return parsed as Item[];
+}
+
+type ItemSource = () => Promise<Item[]>;
+
+let itemSource: ItemSource = loadSampleFile;
+let cachedItems: Item[] | undefined;
+
+/**
+ * TESTS ONLY. Swap in a fixture so tool tests don't need your real data
+ * source. Call `resetItemSource()` afterwards.
+ */
+export function setItemSource(source: ItemSource): void {
+  itemSource = source;
+  cachedItems = undefined;
+}
+
+/** TESTS ONLY. Restores the shipped sample-data loader. */
+export function resetItemSource(): void {
+  itemSource = loadSampleFile;
+  cachedItems = undefined;
+}
+
+async function loadItems(): Promise<Item[]> {
+  cachedItems ??= await itemSource();
+  return cachedItems;
+}
+
+/**
+ * Called on shutdown, before the process exits. If you opened a connection
+ * pool in `loadItems`, close it here:  await pool.end();
+ */
+export async function closeTools(): Promise<void> {
+  cachedItems = undefined;
+}
+
+// ---------------------------------------------------------------------------
+// Your tools
+// ---------------------------------------------------------------------------
+
+const searchItems: LocalTool = {
+  name: "search_items",
+  description:
+    "Search the knowledge base by keyword. Returns matching items with title, date, source, and summary. Use this when someone asks about a topic, company, or concept.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      query: {
+        type: "string",
+        description: "Search term — a keyword, name, or phrase",
+      },
+      tag: {
+        type: "string",
+        description: "Optional tag to filter by (e.g. 'engineering', 'product')",
+      },
+      limit: {
+        type: "number",
+        description: "Max results to return (default 10)",
+      },
+    },
+    required: ["query"],
+  },
+  run: (input) =>
+    runSearch(
+      readRequiredString(input.query, "query"),
+      readOptionalString(input.tag, "tag"),
+      readPositiveInteger(input.limit, DEFAULT_LIMIT, MAX_LIMIT, "limit")
+    ),
+};
+
+const getItem: LocalTool = {
+  name: "get_item",
+  description:
+    "Get full details for a specific item by its ID. Use this when someone wants to read the full content of something found via search.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      id: {
+        type: "string",
+        description: "The item ID",
+      },
+    },
+    required: ["id"],
+  },
+  run: (input) => runGetItem(readRequiredString(input.id, "id")),
+};
+
+const listRecent: LocalTool = {
+  name: "list_recent",
+  description:
+    "List the most recent items in the knowledge base. Use this when someone asks 'what's new' or 'what happened this week'.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      days: {
+        type: "number",
+        description: "How many days back to look (default 7)",
+      },
+      limit: {
+        type: "number",
+        description: "Max results to return (default 10)",
+      },
+    },
+  },
+  run: (input) =>
+    runListRecent(
+      readPositiveInteger(input.days, DEFAULT_RECENT_DAYS, MAX_RECENT_DAYS, "days"),
+      readPositiveInteger(input.limit, DEFAULT_LIMIT, MAX_LIMIT, "limit")
+    ),
+};
+
+/**
+ * Add your tools here. To gate one by Slack user, start its `run` with:
+ *   if (context.userId !== "U123456") return { error: "Not authorized" };
+ */
+const LOCAL_TOOLS: LocalTool[] = [searchItems, getItem, listRecent];
+
+/**
+ * Anthropic-hosted tools work alongside yours — no implementation needed.
+ * Uncomment to let the bot search the web:
+ *
+ * const SERVER_TOOLS: ToolUnion[] = [
+ *   { type: "web_search_20260209", name: "web_search", max_uses: 5 },
+ * ];
+ */
+const SERVER_TOOLS: ToolUnion[] = [];
+
+// ---------------------------------------------------------------------------
+// Wiring — you shouldn't need to touch below this line
+// ---------------------------------------------------------------------------
+
+export const tools: ToolUnion[] = [
+  ...LOCAL_TOOLS.map(
+    (tool): ToolUnion => ({
+      name: tool.name,
+      description: tool.description,
+      input_schema: tool.inputSchema,
+    })
+  ),
+  ...SERVER_TOOLS,
+];
+
+const dispatch = new Map(LOCAL_TOOLS.map((tool) => [tool.name, tool]));
+
+export async function runTool(
+  name: string,
+  input: Record<string, unknown>,
+  context: ToolContext
+): Promise<unknown> {
+  const tool = dispatch.get(name);
+  if (!tool) {
+    throw new Error(`Unknown tool: ${name}`);
+  }
+
+  return tool.run(input, context);
+}
+
+// ---------------------------------------------------------------------------
+// Implementations
+// ---------------------------------------------------------------------------
+
+async function runSearch(
   query: string,
   tag?: string,
   limit = DEFAULT_LIMIT
-): ItemPreview[] {
-  const data = loadData();
+): Promise<ItemPreview[]> {
+  const data = await loadItems();
   const queryTerms = query.toLowerCase().split(/\s+/).filter(Boolean);
   if (queryTerms.length === 0) return [];
   const normalizedTag = tag?.toLowerCase();
@@ -167,16 +284,16 @@ function searchItems(
     .map(({ item }) => toPreview(item));
 }
 
-function getItem(id: string): Item | { error: string } {
-  const data = loadData();
+async function runGetItem(id: string): Promise<Item | { error: string }> {
+  const data = await loadItems();
   return data.find((item) => item.id === id) ?? { error: `Item '${id}' not found` };
 }
 
-function listRecent(
+async function runListRecent(
   days = DEFAULT_RECENT_DAYS,
   limit = DEFAULT_LIMIT
-): ItemPreview[] {
-  const data = loadData();
+): Promise<ItemPreview[]> {
+  const data = await loadItems();
   const cutoff = startOfUtcDay(new Date()) - (days - 1) * MS_PER_DAY;
 
   return data
@@ -184,14 +301,6 @@ function listRecent(
     .sort(sortByDateDescending)
     .slice(0, limit)
     .map(toPreview);
-}
-
-function loadData(): Item[] {
-  const raw = readFileSync(
-    new URL("../data/sample-data.json", import.meta.url),
-    "utf-8"
-  );
-  return JSON.parse(raw) as Item[];
 }
 
 function toPreview({ content: _content, ...rest }: Item): ItemPreview {
@@ -215,6 +324,14 @@ function parseItemDate(date: string): number {
 function startOfUtcDay(date: Date): number {
   return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
 }
+
+// ---------------------------------------------------------------------------
+// KEEP THESE — input validation
+//
+// Claude supplies these values, so they are untrusted input. These helpers
+// clamp rather than throw where a sensible bound exists. If you replace the
+// sample tools, keep this section and use it in your own `run` functions.
+// ---------------------------------------------------------------------------
 
 function readRequiredString(value: unknown, fieldName: string): string {
   if (typeof value !== "string" || value.trim() === "") {

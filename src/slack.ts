@@ -3,36 +3,53 @@
  *
  * Receives messages, fetches thread history, streams agent text into a
  * single message in the thread.
+ *
+ * `startSlackBot` returns a handle: `stop` for clean shutdown, and `app` —
+ * the live Bolt instance — so slash commands, buttons, and `app.use`
+ * middleware can be registered from index.ts without editing this file.
  */
 
 import pkg from "@slack/bolt";
 const { App } = pkg;
 
+import type { AgentRequest, HistoryMessage, OnTextDelta } from "./agent.js";
 import { toSlackMrkdwn } from "./format.js";
 
-const FALLBACK_ERROR_MESSAGE =
+// --- Copy and behaviour knobs. Exported so index.ts and tests can reuse them.
+export const FALLBACK_ERROR_MESSAGE =
   "I hit an error while processing that message. Please try again.";
-const THREAD_HISTORY_LIMIT = 20;
-const PLACEHOLDER_TEXT = "…";
-const STREAM_UPDATE_INTERVAL_MS = 1_500;
-const MAX_CHUNK_SIZE = 3_500;
+export const UNSUPPORTED_ATTACHMENT_MESSAGE =
+  "I can't read files or images yet — paste the text and I'll take a look.";
+export const PLACEHOLDER_TEXT = "…";
+/** The emoji shown while the bot is working. */
+export const WORKING_REACTION = "eyes";
+/**
+ * `conversations.replies` pages forward from the thread parent, so a small
+ * limit returns the *oldest* messages. Fetch a wide window and keep the tail.
+ * How much of that tail reaches the model is agent.ts's
+ * MAX_THREAD_HISTORY_MESSAGES — that is the limit that binds.
+ */
+export const THREAD_FETCH_LIMIT = 100;
+export const STREAM_UPDATE_INTERVAL_MS = 1_500;
+/** Slack rejects messages longer than this. */
+export const MAX_CHUNK_SIZE = 3_500;
+/** Slack redelivers events on reconnect; remember recent ones to stay idempotent. */
+export const DEDUPE_TTL_MS = 10 * 60 * 1_000;
+export const DEDUPE_MAX_ENTRIES = 1_000;
+
 const STREAM_TRUNCATION_SUFFIX = "… _(continuing)_";
 const NO_UNFURL = { unfurl_links: false, unfurl_media: false } as const;
 
-type OnTextDelta = (delta: string, fullText: string) => void;
-
-interface SlackConfig {
+export interface SlackConfig {
   botToken: string;
   appToken: string;
   allowedChannels?: ReadonlySet<string>;
-  onMessage: (
-    text: string,
-    threadHistory: string[],
-    onTextDelta?: OnTextDelta
-  ) => Promise<string>;
+  onMessage: (request: AgentRequest) => Promise<string>;
 }
 
 interface ThreadHistoryMessage {
+  ts?: string;
+  user?: string;
   bot_id?: string;
   text?: string;
 }
@@ -83,6 +100,7 @@ export interface MentionEvent {
   channel: string;
   ts: string;
   thread_ts?: string;
+  user?: string;
 }
 
 export interface DirectMessageEvent {
@@ -91,6 +109,7 @@ export interface DirectMessageEvent {
   ts: string;
   thread_ts?: string;
   text?: string;
+  user?: string;
   bot_id?: string;
   bot_profile?: Record<string, unknown>;
   subtype?: string;
@@ -103,12 +122,38 @@ export type SlackSay = (message: {
   unfurl_media?: boolean;
 }) => Promise<{ ts?: string } | undefined>;
 
-export async function startSlackBot(config: SlackConfig): Promise<void> {
+export interface IncomingMessage {
+  client: SlackHistoryClient;
+  say: SlackSay;
+  channel: string;
+  threadTs: string;
+  text: string;
+  onMessage: SlackConfig["onMessage"];
+  /** The ts of the message we're replying to — carries the 👀 reaction. */
+  messageTs?: string;
+  /** Our own bot user ID, used to attribute thread history correctly. */
+  botUserId?: string;
+  /** The Slack user who sent it, passed through to tools for authorization. */
+  userId?: string;
+}
+
+/** Handle returned by startSlackBot. `app` is the live Bolt instance. */
+export interface SlackBot {
+  app: InstanceType<typeof App>;
+  stop: () => Promise<void>;
+}
+
+export async function startSlackBot(config: SlackConfig): Promise<SlackBot> {
   const app = new App({
     token: config.botToken,
     appToken: config.appToken,
     socketMode: true,
   });
+
+  // Needed to tell our own past replies apart from other bots' messages when
+  // reconstructing thread history.
+  const botUserId = await resolveBotUserId(app);
+  const seen = createEventDeduper();
 
   app.event("app_mention", async ({ event, client, say }) => {
     if (!isMentionEvent(event)) {
@@ -123,60 +168,145 @@ export async function startSlackBot(config: SlackConfig): Promise<void> {
       return;
     }
 
+    if (seen.isDuplicate(event.channel, event.ts)) {
+      console.log(`Ignoring redelivered app_mention: ${event.channel}/${event.ts}`);
+      return;
+    }
+
     const text = normalizeMentionText(event.text);
     if (!text) return;
 
-    await handleIncomingMessage(
+    await handleIncomingMessage({
       client,
-      (message) => say(message) as ReturnType<SlackSay>,
-      event.channel,
-      event.thread_ts ?? event.ts,
+      say: (message) => say(message) as ReturnType<SlackSay>,
+      channel: event.channel,
+      threadTs: event.thread_ts ?? event.ts,
       text,
-      config.onMessage,
-      event.ts
-    );
+      onMessage: config.onMessage,
+      messageTs: event.ts,
+      ...(botUserId ? { botUserId } : {}),
+      ...(event.user ? { userId: event.user } : {}),
+    });
   });
 
   app.event("message", async ({ event, client, say }) => {
-    if (!shouldHandleDirectMessage(event)) return;
+    const disposition = classifyDirectMessage(event);
+    if (disposition === "ignore") return;
 
-    const text = normalizeInboundText(event.text ?? "");
-    if (!text.trim()) return;
+    const dm = event as DirectMessageEvent;
+    if (seen.isDuplicate(dm.channel, dm.ts)) {
+      console.log(`Ignoring redelivered DM: ${dm.channel}/${dm.ts}`);
+      return;
+    }
 
-    await handleIncomingMessage(
+    // A DM with an attachment used to be dropped in total silence. Say so
+    // rather than answering from tools as if the file had been read.
+    if (disposition === "unsupported-attachment") {
+      await say({
+        text: UNSUPPORTED_ATTACHMENT_MESSAGE,
+        thread_ts: dm.thread_ts ?? dm.ts,
+        ...NO_UNFURL,
+      });
+      return;
+    }
+
+    const text = normalizeMentionText(dm.text ?? "");
+    if (!text) return;
+
+    await handleIncomingMessage({
       client,
-      (message) => say(message) as ReturnType<SlackSay>,
-      event.channel,
-      event.thread_ts ?? event.ts,
+      say: (message) => say(message) as ReturnType<SlackSay>,
+      channel: dm.channel,
+      threadTs: dm.thread_ts ?? dm.ts,
       text,
-      config.onMessage,
-      event.ts
-    );
+      onMessage: config.onMessage,
+      messageTs: dm.ts,
+      ...(botUserId ? { botUserId } : {}),
+      ...(dm.user ? { userId: dm.user } : {}),
+    });
   });
 
   await app.start();
   console.log("Bot is running (Socket Mode)");
+
+  return { app, stop: () => app.stop().then(() => undefined) };
+}
+
+async function resolveBotUserId(app: {
+  client: { auth: { test: () => Promise<{ user_id?: string }> } };
+}): Promise<string | undefined> {
+  try {
+    const auth = await app.client.auth.test();
+    return typeof auth.user_id === "string" ? auth.user_id : undefined;
+  } catch (error) {
+    // Non-fatal: history attribution falls back to the bot_id heuristic.
+    console.error("Failed to resolve bot user ID", error);
+    return undefined;
+  }
+}
+
+interface EventDeduper {
+  isDuplicate(channel: string, ts: string): boolean;
+}
+
+export function createEventDeduper(
+  ttlMs: number = DEDUPE_TTL_MS,
+  maxEntries: number = DEDUPE_MAX_ENTRIES,
+  now: () => number = Date.now
+): EventDeduper {
+  const seen = new Map<string, number>();
+
+  return {
+    isDuplicate(channel: string, ts: string): boolean {
+      const key = `${channel}:${ts}`;
+      const currentTime = now();
+
+      for (const [seenKey, seenAt] of seen) {
+        if (currentTime - seenAt > ttlMs) {
+          seen.delete(seenKey);
+        } else {
+          // Map preserves insertion order, so the rest are newer.
+          break;
+        }
+      }
+
+      if (seen.has(key)) return true;
+
+      seen.set(key, currentTime);
+      while (seen.size > maxEntries) {
+        const oldest = seen.keys().next().value;
+        if (oldest === undefined) break;
+        seen.delete(oldest);
+      }
+
+      return false;
+    },
+  };
 }
 
 async function getThreadHistory(
   client: SlackHistoryClient,
   channel: string,
-  threadTs: string
-): Promise<string[]> {
+  threadTs: string,
+  excludeTs: ReadonlySet<string>,
+  botUserId?: string
+): Promise<HistoryMessage[]> {
   try {
     const result = await client.conversations.replies({
       channel,
       ts: threadTs,
-      limit: THREAD_HISTORY_LIMIT,
+      limit: THREAD_FETCH_LIMIT,
     });
 
     return (result.messages ?? [])
-      .slice(0, -1)
-      .flatMap((message) => {
-        const role = message.bot_id ? "assistant" : "user";
-        const content = normalizeInboundText(message.text ?? "");
+      .filter((message) => !message.ts || !excludeTs.has(message.ts))
+      .flatMap((message): HistoryMessage[] => {
+        const text = normalizeMentionText(message.text ?? "");
+        if (!text) return [];
 
-        return content ? [`${role}: ${content}`] : [];
+        return [
+          { role: isOwnMessage(message, botUserId) ? "assistant" : "user", text },
+        ];
       });
   } catch (error) {
     console.error("Failed to load thread history", error);
@@ -184,25 +314,52 @@ async function getThreadHistory(
   }
 }
 
+/**
+ * Only *our* replies are the assistant turn. Other bots in the thread are
+ * third parties and belong in the user role — attributing their messages to
+ * ourselves makes Claude think it said things it never said.
+ */
+function isOwnMessage(
+  message: ThreadHistoryMessage,
+  botUserId?: string
+): boolean {
+  if (botUserId) return message.user === botUserId;
+  return Boolean(message.bot_id);
+}
+
 export async function handleIncomingMessage(
-  client: SlackHistoryClient,
-  say: SlackSay,
-  channel: string,
-  threadTs: string,
-  text: string,
-  onMessage: SlackConfig["onMessage"],
-  messageTs?: string
+  input: IncomingMessage
 ): Promise<void> {
-  const reactionTs = messageTs ?? threadTs;
-  await addReaction(client, channel, reactionTs, "eyes");
+  const { client, say, channel, threadTs, text, onMessage, botUserId } = input;
+  const reactionTs = input.messageTs ?? threadTs;
+  await addReaction(client, channel, reactionTs, WORKING_REACTION);
 
   const placeholder = await postPlaceholder(say, threadTs);
 
   try {
-    const threadHistory = await getThreadHistory(client, channel, threadTs);
+    // The inbound message and our own placeholder are already accounted for —
+    // the first as `text`, the second as the reply we're about to fill in.
+    const excludeTs = new Set(
+      [input.messageTs, placeholder?.ts].filter(
+        (value): value is string => typeof value === "string"
+      )
+    );
+    const history = await getThreadHistory(
+      client,
+      channel,
+      threadTs,
+      excludeTs,
+      botUserId
+    );
+
+    const context = {
+      channelId: channel,
+      threadTs,
+      ...(input.userId ? { userId: input.userId } : {}),
+    };
 
     if (!placeholder?.ts) {
-      const response = await onMessage(text, threadHistory);
+      const response = await onMessage({ text, history, context });
       await sendChunks(
         say,
         threadTs,
@@ -223,8 +380,11 @@ export async function handleIncomingMessage(
       STREAM_UPDATE_INTERVAL_MS
     );
 
-    const response = await onMessage(text, threadHistory, (_delta, fullText) => {
-      updater.schedule(fullText);
+    const response = await onMessage({
+      text,
+      history,
+      context,
+      onTextDelta: (_delta, fullText) => updater.schedule(fullText),
     });
 
     await updater.cancel();
@@ -243,7 +403,7 @@ export async function handleIncomingMessage(
     console.error("Failed to handle Slack message", error);
     await sendErrorReply(client, say, channel, threadTs, placeholder?.ts);
   } finally {
-    await removeReaction(client, channel, reactionTs, "eyes");
+    await removeReaction(client, channel, reactionTs, WORKING_REACTION);
   }
 }
 
@@ -420,7 +580,7 @@ async function sendChunks(
 }
 
 export function normalizeMentionText(text: string): string {
-  return normalizeInboundText(text.replace(/<@[A-Z0-9]+>/g, " "));
+  return text.replace(/<@[A-Z0-9]+>/g, " ").replace(/\s+/g, " ").trim();
 }
 
 export function isChannelAllowed(
@@ -430,19 +590,32 @@ export function isChannelAllowed(
   return !allowlist || allowlist.has(channel);
 }
 
+/**
+ * What to do with a `message` event.
+ *
+ * Slack delivers a DM with an attached file as `subtype: "file_share"`. That
+ * used to fall into `ignore`, so someone who DM'd a screenshot got no reply,
+ * no log line, and no reaction. It gets an honest answer instead.
+ */
+export type DirectMessageDisposition =
+  | "handle"
+  | "unsupported-attachment"
+  | "ignore";
+
+export function classifyDirectMessage(event: unknown): DirectMessageDisposition {
+  if (!isDirectMessageEvent(event)) return "ignore";
+  if (event.bot_id || event.bot_profile) return "ignore";
+
+  if (event.subtype === "file_share") return "unsupported-attachment";
+  if (event.subtype) return "ignore";
+
+  return "handle";
+}
+
 export function shouldHandleDirectMessage(
   event: unknown
 ): event is DirectMessageEvent {
-  return (
-    isDirectMessageEvent(event) &&
-    !event.bot_id &&
-    !event.bot_profile &&
-    !event.subtype
-  );
-}
-
-function normalizeInboundText(text: string): string {
-  return text.replace(/\s+/g, " ").trim();
+  return classifyDirectMessage(event) === "handle";
 }
 
 function isMentionEvent(event: unknown): event is MentionEvent {
@@ -454,7 +627,8 @@ function isMentionEvent(event: unknown): event is MentionEvent {
     typeof event.text === "string" &&
     typeof event.channel === "string" &&
     typeof event.ts === "string" &&
-    (event.thread_ts === undefined || typeof event.thread_ts === "string")
+    (event.thread_ts === undefined || typeof event.thread_ts === "string") &&
+    (event.user === undefined || typeof event.user === "string")
   );
 }
 
@@ -469,6 +643,7 @@ function isDirectMessageEvent(event: unknown): event is DirectMessageEvent {
     typeof event.ts === "string" &&
     (event.thread_ts === undefined || typeof event.thread_ts === "string") &&
     (event.text === undefined || typeof event.text === "string") &&
+    (event.user === undefined || typeof event.user === "string") &&
     (event.bot_id === undefined || typeof event.bot_id === "string") &&
     (event.bot_profile === undefined || isRecord(event.bot_profile)) &&
     (event.subtype === undefined || typeof event.subtype === "string")
@@ -478,3 +653,5 @@ function isDirectMessageEvent(event: unknown): event is DirectMessageEvent {
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
+
+export type { OnTextDelta };
