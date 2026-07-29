@@ -9,10 +9,9 @@
  * unterminated tokens (e.g. `**bo`) pass through as literals and are
  * re-rendered correctly once the rest of the stream arrives.
  *
- * Code spans and fenced blocks are extracted before any conversion runs and
- * restored afterwards, so `**not bold**` inside a snippet stays literal.
- * Slack renders both `inline` and ``` fences natively, so they pass straight
- * through.
+ * Two things are masked before any conversion runs and restored afterwards:
+ * code (spans and fences), so `**not bold**` inside a snippet stays literal;
+ * and the links we generate, so escaping can't mangle a URL.
  */
 
 /**
@@ -32,46 +31,73 @@ const BOLD_CLOSE = `${SENTINEL}/b${SENTINEL}`;
 const CODE_PATTERN =
   /```[\s\S]*?```|~~~[\s\S]*?~~~|```[\s\S]*$|~~~[\s\S]*$|``[^`]*``|`[^`\n]*`/g;
 
+const LINK_PATTERN = /\[([^\]\n]*)\]\((https?:\/\/[^)\s]+)\)/g;
+
 export function toSlackMrkdwn(text: string): string {
   if (!text) return text;
 
   // Drop any incoming sentinel so a payload can't forge a placeholder.
-  const { masked, blocks } = maskCode(text.split(SENTINEL).join(""));
+  const stash: string[] = [];
+  let out = mask(text.split(SENTINEL).join(""), CODE_PATTERN, stash);
 
-  let out = masked;
+  // Links are extracted before escaping so the URL keeps its raw `&` and the
+  // angle brackets we emit aren't turned into entities.
+  out = out.replace(LINK_PATTERN, (_match, label: string, url: string) =>
+    store(`<${url}|${escapeSlack(label)}>`, stash)
+  );
+
+  out = escapeSlack(out);
 
   out = convertBold(out);
   out = convertItalic(out);
   out = restoreBold(out);
 
   out = convertStrikethrough(out);
-  out = convertLinks(out);
   out = convertBullets(out);
   out = convertHeadings(out);
 
-  return restoreCode(out, blocks);
+  return restore(out, stash);
 }
 
 /**
- * Replace every code span and fenced block with an opaque placeholder so the
- * markdown conversions below can't reach inside them.
+ * Slack parses anything in angle brackets as a control token, so unescaped
+ * text can produce live mentions. A tool row or a quoted message containing
+ * `<!channel>` would otherwise make the bot broadcast to everyone on an
+ * attacker's behalf. Escaping is also what makes `AT&T` and `x < y` render.
+ *
+ * Only these three, per Slack's spec — escaping more would show up literally.
  */
-function maskCode(text: string): { masked: string; blocks: string[] } {
-  const blocks: string[] = [];
-  const masked = text.replace(CODE_PATTERN, (match) => {
-    blocks.push(match);
-    return `${SENTINEL}c${blocks.length - 1}${SENTINEL}`;
-  });
-
-  return { masked, blocks };
+function escapeSlack(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
 }
 
-function restoreCode(text: string, blocks: string[]): string {
-  if (blocks.length === 0) return text;
+function store(value: string, stash: string[]): string {
+  stash.push(value);
+  return `${SENTINEL}${stash.length - 1}${SENTINEL}`;
+}
+
+function mask(text: string, pattern: RegExp, stash: string[]): string {
+  return text.replace(pattern, (match) => store(match, stash));
+}
+
+/**
+ * Restores masked spans verbatim — code is deliberately NOT escaped.
+ *
+ * Slack does not parse mentions or links inside code, so the injection risk
+ * that motivates escaping doesn't exist there. Escaping anyway would render
+ * a shell snippet as `npm run check &amp;&amp; start` if Slack doesn't decode
+ * entities in code blocks, which is a visible regression for zero gain. Left
+ * raw, code round-trips exactly as it does today.
+ */
+function restore(text: string, stash: string[]): string {
+  if (stash.length === 0) return text;
 
   return text.replace(
-    new RegExp(`${SENTINEL}c(\\d+)${SENTINEL}`, "g"),
-    (_match, index: string) => blocks[Number(index)] ?? ""
+    new RegExp(`${SENTINEL}(\\d+)${SENTINEL}`, "g"),
+    (_match, index: string) => stash[Number(index)] ?? ""
   );
 }
 
@@ -85,10 +111,17 @@ function convertBold(text: string): string {
 
 /**
  * Remaining `*X*` are italics in standard markdown — Slack uses `_X_`.
- * Also map `_X_` → `_X_` (no-op, but normalizes if Claude mixes styles).
+ *
+ * The flanking rules matter: CommonMark only opens emphasis on a `*` followed
+ * by non-space, and only closes on one preceded by non-space. Without them
+ * `SELECT * FROM t WHERE a * b` became `SELECT _ FROM t WHERE a _ b`, and
+ * `match *.log and 3 * 4` was corrupted the same way.
  */
 function convertItalic(text: string): string {
-  return text.replace(/(^|[\s(])\*([^*\n]+?)\*(?=[\s).,!?:;]|$)/g, "$1_$2_");
+  return text.replace(
+    /(^|[\s(])\*(?![\s*])([^*\n]+?)(?<![\s*])\*(?=[\s).,!?:;]|$)/g,
+    "$1_$2_"
+  );
 }
 
 function restoreBold(text: string): string {
@@ -103,19 +136,14 @@ function convertStrikethrough(text: string): string {
 }
 
 /**
- * `[label](https://example.com)` → `<https://example.com|label>`.
- * Bare URLs are left alone — Slack auto-linkifies them.
- */
-function convertLinks(text: string): string {
-  return text.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, "<$2|$1>");
-}
-
-/**
  * `- item` or `* item` at line start → `• item`.
  * Preserves leading indent so nested lists keep their shape.
+ *
+ * The separator is same-line whitespace only: `\s+` let a bare `-` on its own
+ * line swallow the newline and pull the following line up into the bullet.
  */
 function convertBullets(text: string): string {
-  return text.replace(/^(\s*)[-*]\s+/gm, "$1• ");
+  return text.replace(/^([ \t]*)[-*][ \t]+/gm, "$1• ");
 }
 
 /**
@@ -124,7 +152,10 @@ function convertBullets(text: string): string {
  * is lost deliberately: the alternatives (blank lines for H1/H2, or stripping
  * `#` and leaving the text plain) either burn vertical space in tight threads
  * or make section titles read as ordinary sentences.
+ *
+ * The optional closing run must be whitespace-separated, or `## Sharp C#`
+ * loses the `#` that belongs to the word.
  */
 function convertHeadings(text: string): string {
-  return text.replace(/^#{1,6}[ \t]+(.+?)[ \t]*#*[ \t]*$/gm, "*$1*");
+  return text.replace(/^#{1,6}[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*$/gm, "*$1*");
 }

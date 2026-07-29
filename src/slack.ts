@@ -456,14 +456,19 @@ export async function handleIncomingMessage(
       STREAM_UPDATE_INTERVAL_MS
     );
 
-    const response = await onMessage({
-      text,
-      history,
-      context,
-      onTextDelta: (_delta, fullText) => updater.schedule(fullText),
-    });
-
-    await updater.cancel();
+    let response: string;
+    try {
+      response = await onMessage({
+        text,
+        history,
+        context,
+        onTextDelta: (_delta, fullText) => updater.schedule(fullText),
+      });
+    } finally {
+      // Must run even when onMessage throws: otherwise a queued update lands
+      // after sendErrorReply and replaces the error with stale partial text.
+      await updater.cancel();
+    }
 
     const chunks = chunkText(toSlackMrkdwn(response), MAX_CHUNK_SIZE);
     await client.chat.update({
@@ -572,10 +577,16 @@ interface ThrottledUpdater {
  *
  * - First call fires immediately (instant feedback on first token).
  * - Subsequent calls within the interval coalesce — only the latest text wins.
- * - cancel() stops the timer and awaits any in-flight update without emitting
- *   anything more — caller takes over the final state (e.g. chunked sends).
+ * - cancel() stops the timer, prevents any further update, and awaits
+ *   everything already issued — so the caller can safely write the final state
+ *   (e.g. chunked sends) knowing nothing can land after it.
  *
- * Concurrency: at most one update in flight at a time.
+ * Updates are **serialized**: each waits for the previous to settle. This is
+ * load-bearing, not tidiness. `@slack/web-api` retries a 429 internally with
+ * no request timeout, so one `chat.update` can stay open for tens of seconds
+ * while later ones succeed. Firing concurrently let a stale update land after
+ * the final answer, and Slack is last-write-wins — the user was left reading
+ * truncated partial text with the working indicator already removed.
  */
 export function createThrottledUpdater(
   update: (text: string) => Promise<unknown>,
@@ -584,16 +595,23 @@ export function createThrottledUpdater(
   let pendingText: string | null = null;
   let lastEmittedAt = 0;
   let timer: ReturnType<typeof setTimeout> | null = null;
-  let inFlight: Promise<unknown> = Promise.resolve();
+  let chain: Promise<unknown> = Promise.resolve();
   let lastEmittedText = "";
+  let cancelled = false;
 
   function fire(text: string): void {
     if (text === lastEmittedText) return;
     lastEmittedAt = Date.now();
     lastEmittedText = text;
-    inFlight = update(text).catch((error: unknown) => {
-      console.error("Failed to update Slack message", error);
-    });
+
+    // Queue behind the previous update rather than racing it. A `cancel()`
+    // that happens while this is queued drops it instead of overwriting
+    // whatever the caller wrote in the meantime.
+    chain = chain
+      .then(() => (cancelled ? undefined : update(text)))
+      .catch((error: unknown) => {
+        console.error("Failed to update Slack message", error);
+      });
   }
 
   function schedule(text: string): void {
@@ -619,12 +637,16 @@ export function createThrottledUpdater(
   }
 
   async function cancel(): Promise<void> {
+    // Set first: anything already queued on the chain must become a no-op
+    // rather than landing after the caller's final write.
+    cancelled = true;
+
     if (timer) {
       clearTimeout(timer);
       timer = null;
     }
     pendingText = null;
-    await inFlight;
+    await chain;
   }
 
   return { schedule, cancel };
@@ -672,12 +694,13 @@ export function chunkText(text: string, maxSize: number): string[] {
  * fence and chunk N+1 opening with an orphaned closer — both render as broken
  * code in Slack. Close the fence at the boundary and reopen it after.
  *
- * Counts only a BARE fence line: ``` alone, or ``` plus a language tag. That
- * is what actually makes one a delimiter, and it is deliberately stricter than
- * "starts a line" — chunking can move a mid-sentence ``` to the front of a
- * chunk, and matching on position alone would then invent a fence around
- * ordinary prose. Being self-contained also means this stays correct without
- * depending on `format.ts` having run first.
+ * Counts a fence line: ``` at the start of a line with only an info string
+ * after it (CommonMark allows anything but a backtick there, so ```c# and
+ * ```js title="x" both count). Requiring the line to END there is what keeps
+ * a mid-sentence ``` from counting — chunking can move one to the front of a
+ * chunk, and matching on position alone would invent a fence around ordinary
+ * prose. Being self-contained also means this stays correct without depending
+ * on `format.ts` having run first.
  *
  * Tilde fences (~~~) are not repaired — Claude effectively always emits
  * backticks, and tracking two delimiter styles needs a real state machine
@@ -710,8 +733,21 @@ async function sendChunks(
   }
 }
 
+/**
+ * Strips the bot's own @-handle and tidies whitespace.
+ *
+ * Collapses horizontal whitespace only. Flattening newlines destroyed exactly
+ * what people paste in — stack traces, logs, SQL, code — and the bot's own
+ * attachment reply tells them to paste text instead of uploading a file.
+ * Runs of blank lines are capped so the token cost stays bounded.
+ */
 export function normalizeMentionText(text: string): string {
-  return text.replace(/<@[A-Z0-9]+>/g, " ").replace(/\s+/g, " ").trim();
+  return text
+    .replace(/<@[A-Z0-9]+>/g, " ")
+    .replace(/[^\S\n]+/g, " ")
+    .replace(/[ \t]*\n[ \t]*/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 export function isChannelAllowed(

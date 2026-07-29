@@ -305,5 +305,18 @@ Deliberate decisions that look like smells. Leave them alone.
   another bot could drive paid turns and a screenshot got answered from its
   caption. Any new gate goes in a `classify*` function, never inline in one
   handler, or the next surface silently inherits no policy.
+- **`toSlackMrkdwn` escapes `&`, `<`, `>` outside code, and not inside it.** Slack
+  parses angle brackets as control tokens, so unescaped reply text can fire a real
+  `<!channel>` broadcast. Code is exempt because Slack doesn't parse mentions there
+  and escaping would corrupt shell snippets.
+- **The throttled updater serializes and `cancel()` drops unsent updates.** Both are
+  load-bearing: `@slack/web-api` retries a 429 internally with no request timeout, so
+  concurrent updates let a stale one land after the final answer — and Slack is
+  last-write-wins.
+- **`tsx` is a runtime dependency, not a dev one.** `npm start` executes TypeScript
+  directly; moving it back to `devDependencies` breaks every production install.
+- **`rebaseSampleDates` slides the fixture onto the current week.** Without it the
+  README's own first demo, "what's new this week?", returns nothing. Delete it when
+  you swap in real data.
 - **`ToolContext.userId` is optional.** Slack genuinely omits it. Making it required
   would be a lie; the hazard is documented on the type.

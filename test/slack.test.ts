@@ -676,17 +676,66 @@ test("createThrottledUpdater fires the first call immediately and coalesces burs
   assert.deepEqual(calls, ["a", "abc"]);
 });
 
-test("createThrottledUpdater cancel drops pending updates and awaits in-flight", async () => {
-  const calls: string[] = [];
+test("createThrottledUpdater cancel awaits what was sent and drops what wasn't", async () => {
+  const started: string[] = [];
+  const finished: string[] = [];
   const updater = createThrottledUpdater(async (text) => {
-    calls.push(text);
+    started.push(text);
+    await delay(50);
+    finished.push(text);
   }, 1_000);
 
   updater.schedule("first");
-  updater.schedule("second");
+  await delay(10); // let the first update actually begin
+  updater.schedule("second"); // coalesced behind the interval, never sent
+
   await updater.cancel();
 
-  assert.deepEqual(calls, ["first"]);
+  // Already sent: cancel cannot un-send it, so it must be awaited to
+  // completion — otherwise it lands after the caller's final write.
+  assert.deepEqual(started, ["first"]);
+  assert.deepEqual(finished, ["first"]);
+  // Not yet sent: dropped rather than emitted, since the caller is about to
+  // write the final text anyway.
+  assert.ok(!started.includes("second"));
+});
+
+test("createThrottledUpdater serializes updates and never lands one after cancel", async () => {
+  // The failure this guards: @slack/web-api retries a 429 internally with no
+  // request timeout, so one chat.update can stay open for tens of seconds
+  // while later ones succeed. Firing concurrently let a stale update land
+  // AFTER the final answer — and Slack is last-write-wins, so the user was
+  // left reading truncated partial text with the 👀 already removed.
+  const arrivals: string[] = [];
+  let inFlight = 0;
+  let maxInFlight = 0;
+
+  const updater = createThrottledUpdater(async (text) => {
+    inFlight += 1;
+    maxInFlight = Math.max(maxInFlight, inFlight);
+    // First update is slow, as a retried 429 would be.
+    await delay(text === "first" ? 300 : 5);
+    arrivals.push(text);
+    inFlight -= 1;
+  }, 50);
+
+  updater.schedule("first");
+  await delay(80);
+  updater.schedule("second");
+  await delay(80);
+  updater.schedule("third");
+
+  await updater.cancel();
+  arrivals.push("FINAL"); // stands in for the caller's real final write
+  await delay(500);
+
+  assert.equal(maxInFlight, 1, "updates must not overlap");
+  assert.equal(inFlight, 0, "cancel() must await everything already issued");
+  assert.equal(
+    arrivals.at(-1),
+    "FINAL",
+    `a stale update landed after the final answer: ${JSON.stringify(arrivals)}`
+  );
 });
 
 test("createThrottledUpdater deduplicates consecutive identical text", async () => {

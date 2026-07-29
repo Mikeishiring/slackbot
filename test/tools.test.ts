@@ -4,7 +4,9 @@ import test from "node:test";
 import type { ToolContext } from "../src/agent.js";
 import {
   assertUniqueToolNames,
+  resetItemSource,
   runTool,
+  setItemSource,
   tools,
   type LocalTool,
 } from "../src/tools.js";
@@ -100,28 +102,58 @@ test("get_item returns error object for missing ID", async () => {
   assert.match(String(result["error"]), /item-999/);
 });
 
-test("list_recent with 1 day returns only the most recent items", async () => {
-  // item-001 is 2026-03-25 — only items from that date or later
-  const result = (await runTool("list_recent", {
-    days: 1,
-    limit: 50,
-  }, CTX)) as Array<Record<string, unknown>>;
+test("list_recent honours the day window", async (t) => {
+  // Was previously a loop over the sample file whose body never executed —
+  // it asserted nothing. Pin the dates so the window is actually exercised.
+  const day = 24 * 60 * 60 * 1000;
+  const iso = (offset: number) =>
+    new Date(Date.now() - offset * day).toISOString().slice(0, 10);
 
-  // All returned items should have dates >= cutoff
-  for (const item of result) {
-    const date = String(item["date"]);
-    assert.ok(date >= "2026-03-25" || result.length === 0);
-  }
+  setItemSource(async () => [
+    { id: "today", title: "Today", date: iso(0), source: "s", tags: [], summary: "" },
+    { id: "d3", title: "Three days ago", date: iso(3), source: "s", tags: [], summary: "" },
+    { id: "d40", title: "Forty days ago", date: iso(40), source: "s", tags: [], summary: "" },
+  ]);
+  t.after(resetItemSource);
+
+  const oneDay = (await runTool("list_recent", { days: 1 }, CTX)) as Array<
+    Record<string, unknown>
+  >;
+  assert.deepEqual(oneDay.map((item) => item["id"]), ["today"]);
+
+  const week = (await runTool("list_recent", { days: 7 }, CTX)) as Array<
+    Record<string, unknown>
+  >;
+  assert.deepEqual(week.map((item) => item["id"]), ["today", "d3"]);
+
+  const quarter = (await runTool("list_recent", { days: 90 }, CTX)) as Array<
+    Record<string, unknown>
+  >;
+  assert.deepEqual(quarter.map((item) => item["id"]), ["today", "d3", "d40"]);
 });
 
-test("limit is clamped to max 50", async () => {
-  const result = (await runTool("search_items", {
-    query: "the",
-    limit: 999,
-  }, CTX)) as Array<Record<string, unknown>>;
+test("limit is clamped to max 50", async (t) => {
+  // The shipped fixture has 10 items, so `limit: 999` could never reveal
+  // whether the clamp works. Give it 60 matches so 50 is an observable cap.
+  setItemSource(async () =>
+    Array.from({ length: 60 }, (_value, index) => ({
+      id: `bulk-${index}`,
+      title: `Widget report ${index}`,
+      date: "2026-01-01",
+      source: "s",
+      tags: [],
+      summary: "widget",
+    }))
+  );
+  t.after(resetItemSource);
 
-  // Should not exceed sample data size (10 items), but should not throw
-  assert.ok(result.length <= 50);
+  const result = (await runTool(
+    "search_items",
+    { query: "widget", limit: 999 },
+    CTX
+  )) as Array<Record<string, unknown>>;
+
+  assert.equal(result.length, 50, "limit should clamp to MAX_LIMIT, not the fixture size");
 });
 
 test("search_items scores multi-word queries by word overlap", async () => {
