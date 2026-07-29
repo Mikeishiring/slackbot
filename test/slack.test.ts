@@ -160,6 +160,28 @@ test("chunkText closes and reopens a code fence it splits", () => {
   }
 });
 
+test("chunkText does not invent fences around prose that mentions ```", () => {
+  // Only a BARE fence line is a delimiter. Chunking can push a mid-sentence
+  // ``` to the front of a chunk, and matching on line position alone would
+  // then wrap ordinary prose in a code block. Counting backticks is the test:
+  // repair adds them, so an unchanged count proves nothing was invented.
+  const prose = "Use the ``` marker to open a block. ".repeat(60);
+  const chunks = chunkText(prose, 500);
+
+  assert.ok(chunks.length > 1, "expected the prose to be split");
+
+  const backticks = (value: string) => (value.match(/```/g) ?? []).length;
+  assert.equal(
+    chunks.reduce((total, chunk) => total + backticks(chunk), 0),
+    backticks(prose),
+    "repair invented a fence around prose"
+  );
+
+  // And nothing was lost — compared with backticks included.
+  const strip = (value: string) => value.replace(/\s+/g, "");
+  assert.equal(chunks.map(strip).join(""), strip(prose), "content changed");
+});
+
 test("truncateForStream preserves short text and truncates long text with suffix", () => {
   assert.equal(truncateForStream("short"), "short");
 
