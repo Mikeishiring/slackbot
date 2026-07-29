@@ -6,6 +6,7 @@ import {
   createAgent,
   DEFAULT_SYSTEM_PROMPT,
   MAX_THREAD_HISTORY_MESSAGES,
+  MAX_TURN_DURATION_MS,
   resolveSystemPrompt,
   runConversation,
   serializeToolResult,
@@ -347,6 +348,67 @@ test("runConversation keeps partial text when it runs out of tokens", async () =
   // The partial answer is worth more to the reader than a bare error.
   assert.match(output, /Here's what I found so far/);
   assert.match(output, /response limit/i);
+});
+
+test("max_tokens keeps text streamed on earlier turns when the last turn has none", async () => {
+  // The final turn can be all thinking blocks. Reading only its content would
+  // replace an answer the user already watched stream in with a bare note.
+  const { client } = makeClient([
+    makeStream(
+      {
+        stop_reason: "tool_use",
+        content: [
+          { type: "text", text: "Here is what I found so far" },
+          { type: "tool_use", id: "t1", name: "search_items", input: {} },
+        ],
+      } as ModelResponse,
+      ["Here is what I found so far"]
+    ),
+    makeStream({ stop_reason: "max_tokens", content: [] } as ModelResponse),
+  ]);
+
+  const output = await runConversation(
+    request({ client, onTextDelta: () => {} })
+  );
+
+  assert.match(output, /Here is what I found so far/);
+  assert.match(output, /response limit/i);
+});
+
+test("runConversation stops when a message exceeds its wall-clock budget", async () => {
+  // The SDK retries inside a single finalMessage(), so turn count alone does
+  // not bound latency. Simulate turns that each burn most of the budget.
+  let now = 0;
+  const originalNow = Date.now;
+  Date.now = () => now;
+
+  const responses: ModelStream[] = Array.from({ length: 10 }, () => ({
+    on() {
+      return this;
+    },
+    async finalMessage(): Promise<ModelResponse> {
+      now += MAX_TURN_DURATION_MS / 2;
+      return {
+        stop_reason: "tool_use",
+        content: [{ type: "tool_use", id: "t", name: "search_items", input: {} }],
+      } as ModelResponse;
+    },
+  }));
+  const { client, calls } = makeClient(responses);
+
+  const originalWarn = console.warn;
+  console.warn = () => {};
+
+  try {
+    const output = await runConversation(request({ client }));
+
+    assert.match(output, /ran out of time/i);
+    // Bailed on the deadline, well before MAX_MODEL_TURNS.
+    assert.ok(calls.length < 10, `expected an early exit, got ${calls.length} turns`);
+  } finally {
+    Date.now = originalNow;
+    console.warn = originalWarn;
+  }
 });
 
 test("runConversation surfaces a refusal as a dead end, not a retry prompt", async () => {

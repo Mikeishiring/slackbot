@@ -1,4 +1,7 @@
 node_modules/
-.env
+# The family, not one filename — .env.local / .env.production / .env.backup
+# all carry the same three live credentials.
+.env*
+!.env.example
 dist/
 .claude/

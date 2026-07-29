@@ -250,16 +250,19 @@ Open `src/tools.ts` and swap the sample data for your real source. Every recipe 
 
 | I want to… | Where | How |
 |---|---|---|
-| Point at my own data | `tools.ts` → `loadSampleFile` | Replace the body. It's `async`, so a query or `fetch` drops in. |
+| Point at my own data | `tools.ts` → `loadSampleFile` | Replace the body. It's `async`, so a query or `fetch` drops in. Then see the note below — your tool tests will go red until you repoint them. |
 | Add a capability | `tools.ts` → `LOCAL_TOOLS` | Add one `LocalTool` object — schema and `run` together. |
 | Change the persona | `.env` → `ANTHROPIC_SYSTEM_PROMPT_APPEND` | One line. Longer personas go in `index.ts` as `systemPromptAppend`. |
 | Restrict a tool to certain people | `tools.ts` → that tool's `run` | `if (!ALLOWED.has(context.userId ?? "")) return { error: "Not authorized" };` |
-| Log usage or cost per user | `tools.ts` → that tool's `run` | `context` carries `userId`, `channelId`, `threadTs`. |
+| Log which user asked what | `tools.ts` → that tool's `run` | `context` carries `userId`, `channelId`, `threadTs`. |
+| See token cost per turn | already on | `agent.ts` logs one JSON line per model turn with tokens, channel, and user. A tool can't do this — it only sees its own call, not the model turns that dominate the bill. |
 | Add a slash command | `index.ts` | `bot.app.command(...)` — a commented example is in the file. |
 | Let it search the web | `tools.ts` → `SERVER_TOOLS` | Uncomment the `web_search` line. No implementation needed. |
 | Close a DB pool on exit | `tools.ts` → `closeTools` | Called automatically on SIGTERM/SIGINT. |
 
-**Test your tools without a live database.** Copy [`test/tools.example.test.ts`](test/tools.example.test.ts) — it uses `setItemSource()` to swap in a fixture, so your tests keep passing after you switch to Postgres.
+**Swapping the data source turns the shipped tool tests red — that's expected.** `test/tools.test.ts` asserts against sample-data IDs like `item-002`, so once `loadSampleFile` points elsewhere those assertions no longer describe your data.
+
+Copy [`test/tools.example.test.ts`](test/tools.example.test.ts) and delete `test/tools.test.ts`. The template uses `setItemSource()` to swap in a fixture, so your tests keep passing with no live database, no network, and no mocking library — which matters most at exactly the moment you're changing the thing they cover.
 
 **Connect a database:**
 ```typescript
@@ -393,6 +396,8 @@ When you deploy this bot, you're trusting three things:
 
 **It reads direct messages sent to it.** With the default manifest, anything DM'd to the bot is sent to the Anthropic API — and `SLACK_ALLOWED_CHANNELS` does **not** apply to DMs. If that isn't what you want, drop `im:history` and the `message.im` event.
 
+**It reads every message in a thread it replies in** — not just the one that mentioned it. All of them go to the model as conversation input, whatever the author: a teammate, another bot, a webhook integration, or an outside org in a Slack Connect channel. The model can't tell a bystander's message from the request. That makes thread history an *input an attacker can write to*, and since the bot's reply lands in the same thread, the reply is the way data gets back out.
+
 In channels, it reads history only where it's been invited.
 
 ### What this bot does NOT do
@@ -439,6 +444,8 @@ graph TB
 
 **2. Limit channel access.** Only invite the bot to channels where you want it. It can only read history in channels it's been invited to.
 
+A channel ID doesn't change when that channel is later shared externally through Slack Connect, so `SLACK_ALLOWED_CHANNELS` keeps matching while the audience quietly gains an outside organization. Re-check the allowlist whenever a channel is shared.
+
 **3. Use minimal scopes.** This bot does not request `groups:history` (private channels). If you only need channel mentions, drop `im:history` and `message.im` from [`manifest.json`](manifest.json) too. Security here is about omission — you secure it by not granting access, not by configuring something extra.
 
 **4. Rotate tokens if you suspect compromise.** Revoke and regenerate both the bot token and app token from [api.slack.com/apps](https://api.slack.com/apps).
@@ -453,7 +460,7 @@ graph TB
 
 This isn't a flaw — it's how LLMs work. Plan for it:
 
-- Keep tools **read-only** — if the worst case is a search query, injection is harmless
+- Keep tools **read-only** — this bounds the damage to *disclosure*, not to nothing. A read-only tool still posts whatever it can read back into the channel the injected text came from. Assume anything the connection can reach is publishable to that thread's audience
 - **Scope your credentials** — read-only replica, only the tables the bot needs, row-level security
 - **Don't put secrets in the system prompt** — assume it can be extracted
 - **Validate tool inputs** in `runTool()` — don't blindly trust what Claude passes in

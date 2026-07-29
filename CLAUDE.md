@@ -111,6 +111,25 @@ The agent runs on a thinking model. Two rules matter when editing `src/agent.ts`
 `model_context_window_exceeded` included. Add a branch rather than widening the
 `default` case if a new one appears.
 
+## Rules of Engagement
+
+This runbook hands an agent three live credentials and installs an app on a real
+workspace. Before executing any of it:
+
+- **Never echo a secret into the transcript.** `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`,
+  and `ANTHROPIC_API_KEY` go straight into `.env` or the host's secret store. Do not
+  `cat .env`, do not paste a token into a commit message or a PR body, and do not
+  read one back to confirm it. The transcript is a leak surface `.gitignore` cannot
+  cover.
+- **Reading this runbook is not permission to execute it.** Three actions mutate
+  something outside the repo — installing the Slack app to a workspace, creating an
+  Anthropic API key, and deploying to Railway. Confirm with the user before each.
+- **Never commit `.env`.** `.gitignore` covers `.env*` with a `!.env.example`
+  negation; if you add a new secret file, keep it inside that pattern.
+- **Scope changes are a security decision, not a config tweak.** Adding a Slack
+  scope widens what the bot can read for everyone in the workspace. Update
+  `manifest.json` and the README security table together, and say what you widened.
+
 ## Browser Setup Runbook
 
 Use this sequence when guiding setup through Slack, Anthropic, and Railway in a browser.
@@ -280,5 +299,11 @@ Deliberate decisions that look like smells. Leave them alone.
   from the code that can violate them.
 - **`agent.ts` imports defaults from `config.ts`.** The direction is arguably backwards,
   but flipping it unlocks no customization and moves five constants plus their tests.
+- **Both ingress paths classify before acting.** `classifyMention` and
+  `classifyDirectMessage` deliberately mirror each other. They drifted once —
+  DMs filtered bots and refused attachments while mentions did neither, so
+  another bot could drive paid turns and a screenshot got answered from its
+  caption. Any new gate goes in a `classify*` function, never inline in one
+  handler, or the next surface silently inherits no policy.
 - **`ToolContext.userId` is optional.** Slack genuinely omits it. Making it required
   would be a lie; the hazard is documented on the type.

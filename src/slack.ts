@@ -20,6 +20,12 @@ export const FALLBACK_ERROR_MESSAGE =
   "I hit an error while processing that message. Please try again.";
 export const UNSUPPORTED_ATTACHMENT_MESSAGE =
   "I can't read files or images yet — paste the text and I'll take a look.";
+/** Appended when later chunks fail, so a partial answer isn't silently partial. */
+export const TRUNCATED_REPLY_MESSAGE =
+  "_The rest of this answer failed to post — the reply above may be incomplete._";
+/** A bare @-mention or an empty DM. Answering beats silence. */
+export const EMPTY_MENTION_MESSAGE =
+  "I'm here — ask me a question and I'll look it up.";
 export const PLACEHOLDER_TEXT = "…";
 /** The emoji shown while the bot is working. */
 export const WORKING_REACTION = "eyes";
@@ -110,6 +116,11 @@ export interface MentionEvent {
   ts: string;
   thread_ts?: string;
   user?: string;
+  // Slack sends these on app_mention too — we used to not even look.
+  bot_id?: string;
+  bot_profile?: Record<string, unknown>;
+  subtype?: string;
+  files?: unknown[];
 }
 
 export interface DirectMessageEvent {
@@ -177,13 +188,35 @@ export async function startSlackBot(config: SlackConfig): Promise<SlackBot> {
       return;
     }
 
+    const disposition = classifyMention(event);
+    if (disposition === "ignore") {
+      console.log(`Ignoring bot-authored app_mention: ${event.channel}/${event.ts}`);
+      return;
+    }
+
     if (seen.isDuplicate(event.channel, event.ts)) {
       console.log(`Ignoring redelivered app_mention: ${event.channel}/${event.ts}`);
       return;
     }
 
+    if (disposition === "unsupported-attachment") {
+      await say({
+        text: UNSUPPORTED_ATTACHMENT_MESSAGE,
+        thread_ts: event.thread_ts ?? event.ts,
+        ...NO_UNFURL,
+      });
+      return;
+    }
+
     const text = normalizeMentionText(event.text);
-    if (!text) return;
+    if (!text) {
+      await say({
+        text: EMPTY_MENTION_MESSAGE,
+        thread_ts: event.thread_ts ?? event.ts,
+        ...NO_UNFURL,
+      });
+      return;
+    }
 
     await handleIncomingMessage({
       client,
@@ -220,7 +253,14 @@ export async function startSlackBot(config: SlackConfig): Promise<SlackBot> {
     }
 
     const text = normalizeMentionText(dm.text ?? "");
-    if (!text) return;
+    if (!text) {
+      await say({
+        text: EMPTY_MENTION_MESSAGE,
+        thread_ts: dm.thread_ts ?? dm.ts,
+        ...NO_UNFURL,
+      });
+      return;
+    }
 
     await handleIncomingMessage({
       client,
@@ -433,7 +473,20 @@ export async function handleIncomingMessage(
       ...NO_UNFURL,
     });
     if (chunks.length > 1) {
-      await sendChunks(say, threadTs, chunks.slice(1));
+      try {
+        await sendChunks(say, threadTs, chunks.slice(1));
+      } catch (error) {
+        // Chunk 1 is already in the placeholder and the user is reading it.
+        // Falling through to the outer catch would call sendErrorReply, which
+        // overwrites that placeholder — turning a mostly-delivered answer into
+        // no answer at all.
+        console.error("Failed to post the rest of the reply", error);
+        await say({
+          text: TRUNCATED_REPLY_MESSAGE,
+          thread_ts: threadTs,
+          ...NO_UNFURL,
+        }).catch(() => undefined);
+      }
     }
   } catch (error) {
     console.error("Failed to handle Slack message", error);
@@ -583,18 +636,27 @@ export function truncateForStream(text: string): string {
   return text.slice(0, headroom).trimEnd() + STREAM_TRUNCATION_SUFFIX;
 }
 
+/** `\n```” + “```\n` — the most repairSplitFences can add to one chunk. */
+const FENCE_REPAIR_HEADROOM = 8;
+
 export function chunkText(text: string, maxSize: number): string[] {
   if (text.length <= maxSize) return [text];
 
+  // Reserve room for fences we may re-add, so repair can't push a chunk back
+  // over the limit we just split to.
+  const budget = text.includes("```")
+    ? Math.max(1, maxSize - FENCE_REPAIR_HEADROOM)
+    : maxSize;
+
   const chunks: string[] = [];
   let remaining = text;
-  const minSplit = Math.floor(maxSize * 0.5);
+  const minSplit = Math.floor(budget * 0.5);
 
-  while (remaining.length > maxSize) {
-    let splitAt = remaining.lastIndexOf("\n\n", maxSize);
-    if (splitAt < minSplit) splitAt = remaining.lastIndexOf("\n", maxSize);
-    if (splitAt < minSplit) splitAt = remaining.lastIndexOf(" ", maxSize);
-    if (splitAt < minSplit) splitAt = maxSize;
+  while (remaining.length > budget) {
+    let splitAt = remaining.lastIndexOf("\n\n", budget);
+    if (splitAt < minSplit) splitAt = remaining.lastIndexOf("\n", budget);
+    if (splitAt < minSplit) splitAt = remaining.lastIndexOf(" ", budget);
+    if (splitAt < minSplit) splitAt = budget;
 
     const chunk = remaining.slice(0, splitAt).trim();
     if (chunk) chunks.push(chunk);
@@ -602,7 +664,31 @@ export function chunkText(text: string, maxSize: number): string[] {
   }
 
   if (remaining.length > 0) chunks.push(remaining);
-  return chunks;
+  return repairSplitFences(chunks);
+}
+
+/**
+ * A split can land inside a ``` block, leaving chunk N with an unclosed fence
+ * and chunk N+1 opening with an orphaned closer — both render as broken code
+ * in Slack. Close the fence at the boundary and reopen it after.
+ *
+ * Parity is enough here: `format.ts` has already masked and restored fenced
+ * regions, so by this point every ``` in the text is a real fence delimiter.
+ */
+function repairSplitFences(chunks: string[]): string[] {
+  let open = false;
+
+  return chunks.map((chunk) => {
+    const reopened = open ? "```\n" + chunk : chunk;
+
+    // Count delimiters in the chunk as it will actually be sent.
+    const fences = (reopened.match(/```/g) ?? []).length;
+    const endsOpen = (fences % 2 === 1) !== false ? fences % 2 === 1 : false;
+    const closed = endsOpen ? reopened + "\n```" : reopened;
+
+    open = endsOpen;
+    return closed;
+  });
 }
 
 async function sendChunks(
@@ -627,23 +713,53 @@ export function isChannelAllowed(
 }
 
 /**
- * What to do with a `message` event.
+ * What to do with an inbound message.
  *
- * Slack delivers a DM with an attached file as `subtype: "file_share"`. That
- * used to fall into `ignore`, so someone who DM'd a screenshot got no reply,
- * no log line, and no reaction. It gets an honest answer instead.
+ * Both ingress paths classify before acting. They had drifted — DMs filtered
+ * bots and refused attachments while mentions did neither — so any new gate
+ * belongs in a `classify*` function, never inline in one handler.
  */
-export type DirectMessageDisposition =
+export type MessageDisposition =
   | "handle"
   | "unsupported-attachment"
   | "ignore";
 
-export function classifyDirectMessage(event: unknown): DirectMessageDisposition {
+/** @deprecated Use MessageDisposition — kept so the rename isn't breaking. */
+export type DirectMessageDisposition = MessageDisposition;
+
+/**
+ * Slack delivers a DM with an attached file as `subtype: "file_share"`. That
+ * used to fall into `ignore`, so someone who DM'd a screenshot got no reply,
+ * no log line, and no reaction. It gets an honest answer instead.
+ */
+export function classifyDirectMessage(event: unknown): MessageDisposition {
   if (!isDirectMessageEvent(event)) return "ignore";
   if (event.bot_id || event.bot_profile) return "ignore";
 
   if (event.subtype === "file_share") return "unsupported-attachment";
   if (event.subtype) return "ignore";
+
+  return "handle";
+}
+
+/**
+ * The mention-path twin of `classifyDirectMessage`.
+ *
+ * Two gaps this closes. Bolt's `ignoreSelf` filters only *our* bot, so a
+ * webhook relay or a second copy of this starter whose text contains our
+ * handle could drive an unbounded chain of paid turns — and the dedupe can't
+ * break it, because every relayed message has a fresh `ts`. And an @-mention
+ * carrying a screenshot used to be answered from its caption alone, which is
+ * exactly the confident-answer-without-the-data failure the DM path refuses.
+ */
+export function classifyMention(event: MentionEvent): MessageDisposition {
+  if (event.bot_id || event.bot_profile) return "ignore";
+
+  // `files` is the reliable signal on app_mention; `file_share` is a
+  // `message`-event convention. Check both.
+  if (event.files?.length || event.subtype === "file_share") {
+    return "unsupported-attachment";
+  }
 
   return "handle";
 }

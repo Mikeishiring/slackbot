@@ -188,7 +188,16 @@ const listRecent: LocalTool = {
 
 /**
  * Add your tools here. To gate one by Slack user, start its `run` with:
- *   if (context.userId !== "U123456") return { error: "Not authorized" };
+ *   if (!ALLOWED.has(context.userId ?? "")) return { error: "Not authorized" };
+ *
+ * Use an allowlist, not a deny-list: `context.userId` is optional, so
+ * `!==` fails *open* when Slack omits the user.
+ *
+ * And note what this does NOT do. It authorizes the person who asked; it does
+ * not restrict who can read the answer. The reply goes into the thread, so
+ * everyone in that channel sees whatever the tool returned. If data is
+ * sensitive to an audience rather than to a requester, gate on
+ * `context.channelId` as well.
  */
 const LOCAL_TOOLS: LocalTool[] = [searchItems, getItem, listRecent];
 
@@ -218,6 +227,30 @@ export const tools: ToolUnion[] = [
 ];
 
 const dispatch = new Map(LOCAL_TOOLS.map((tool) => [tool.name, tool]));
+
+/**
+ * A duplicate name is otherwise silent: `tools` advertises both entries while
+ * `dispatch` keeps only the last, so Claude sees a tool that resolves to the
+ * wrong implementation. One file makes that eyeball-checkable; this makes it
+ * impossible. Spans SERVER_TOOLS too, since they share the namespace.
+ */
+export function assertUniqueToolNames(candidates: ToolUnion[]): void {
+  const seen = new Set<string>();
+
+  for (const tool of candidates) {
+    const name = "name" in tool ? tool.name : undefined;
+    if (!name) continue;
+
+    if (seen.has(name)) {
+      throw new Error(
+        `Duplicate tool name: ${name}. Every entry in LOCAL_TOOLS and SERVER_TOOLS needs a unique name.`
+      );
+    }
+    seen.add(name);
+  }
+}
+
+assertUniqueToolNames(tools);
 
 export async function runTool(
   name: string,

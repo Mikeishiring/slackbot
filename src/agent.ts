@@ -70,6 +70,15 @@ export const MAX_USER_MESSAGE_CHARS = 2_000;
  * Tune alongside the payloads your own tools return.
  */
 export const MAX_TOOL_RESULT_CHARS = 20_000;
+/**
+ * Wall-clock ceiling for one Slack message, checked between turns.
+ *
+ * Nothing else bounds it: the SDK's retries happen *inside* a single
+ * finalMessage() call, so one turn can burn timeout x (maxRetries + 1) —
+ * 6 minutes at the defaults — and MAX_MODEL_TURNS of those is an hour of a
+ * thread frozen on the placeholder. This caps the whole message instead.
+ */
+export const MAX_TURN_DURATION_MS = 5 * 60 * 1_000;
 
 const TRUNCATION_NOTE = "truncated - ask a narrower question for the rest";
 
@@ -121,6 +130,13 @@ export interface ModelResponse {
   stop_reason?: Message["stop_reason"];
   stop_details?: RefusalStopDetails | null;
   content: Message["content"];
+  /** Token counts for this turn. Logged so cost is visible in `railway logs`. */
+  usage?: {
+    input_tokens?: number;
+    output_tokens?: number;
+    cache_read_input_tokens?: number | null;
+    cache_creation_input_tokens?: number | null;
+  };
 }
 
 export interface ModelStream {
@@ -252,8 +268,17 @@ export async function runConversation(
   const maxTokens = request.maxTokens ?? DEFAULT_ANTHROPIC_MAX_TOKENS;
   const effort = request.effort ?? DEFAULT_ANTHROPIC_EFFORT;
   let streamedText = "";
+  const deadline = Date.now() + MAX_TURN_DURATION_MS;
 
   for (let turn = 0; turn < MAX_MODEL_TURNS; turn++) {
+    if (turn > 0 && Date.now() > deadline) {
+      console.warn(`Message exceeded ${MAX_TURN_DURATION_MS}ms across ${turn} turns`);
+      return appendNote(
+        streamedText.trim(),
+        "I ran out of time on that one. Try asking something narrower."
+      );
+    }
+
     let response: ModelResponse;
 
     try {
@@ -284,6 +309,7 @@ export async function runConversation(
       }
 
       response = await stream.finalMessage();
+      logUsage(response, context, turn);
     } catch (error) {
       console.error("Model request failed", error);
       return "I couldn't reach the model right now. Please try again.";
@@ -296,8 +322,11 @@ export async function runConversation(
 
       case "max_tokens":
         // Keep whatever was generated rather than throwing the answer away.
+        // The final turn may hold only thinking blocks, so fall back to the
+        // text already streamed into Slack across earlier turns — replacing
+        // visible output with a bare note is the one thing worse than partial.
         return appendNote(
-          collectTextContent(response.content, ""),
+          collectTextContent(response.content, "") || streamedText.trim(),
           "I hit the response limit before I could finish. Try asking a narrower question."
         );
 
@@ -370,6 +399,33 @@ export async function runConversation(
   }
 
   return "I hit my limit on tool calls. Try a simpler question?";
+}
+
+/**
+ * One line per model turn. Tools can't do this themselves — a tool sees only
+ * its own call, never the model turns that dominate the bill. `channelId` and
+ * `userId` are Slack identifiers, so treat your logs accordingly.
+ */
+function logUsage(
+  response: ModelResponse,
+  context: ToolContext,
+  turn: number
+): void {
+  const usage = response.usage;
+  if (!usage) return;
+
+  console.log(
+    JSON.stringify({
+      event: "model_turn",
+      turn,
+      channel: context.channelId,
+      user: context.userId ?? null,
+      input_tokens: usage.input_tokens ?? 0,
+      output_tokens: usage.output_tokens ?? 0,
+      cache_read_input_tokens: usage.cache_read_input_tokens ?? 0,
+      stop_reason: response.stop_reason ?? null,
+    })
+  );
 }
 
 function collectTextContent(
