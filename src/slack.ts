@@ -636,7 +636,7 @@ export function truncateForStream(text: string): string {
   return text.slice(0, headroom).trimEnd() + STREAM_TRUNCATION_SUFFIX;
 }
 
-/** `\n```” + “```\n` — the most repairSplitFences can add to one chunk. */
+/** A closing and a reopening fence, with newlines — repairSplitFences' worst case. */
 const FENCE_REPAIR_HEADROOM = 8;
 
 export function chunkText(text: string, maxSize: number): string[] {
@@ -668,13 +668,23 @@ export function chunkText(text: string, maxSize: number): string[] {
 }
 
 /**
- * A split can land inside a ``` block, leaving chunk N with an unclosed fence
- * and chunk N+1 opening with an orphaned closer — both render as broken code
- * in Slack. Close the fence at the boundary and reopen it after.
+ * A split can land inside a fenced block, leaving chunk N with an unclosed
+ * fence and chunk N+1 opening with an orphaned closer — both render as broken
+ * code in Slack. Close the fence at the boundary and reopen it after.
  *
- * Parity is enough here: `format.ts` has already masked and restored fenced
- * regions, so by this point every ``` in the text is a real fence delimiter.
+ * Counts only a BARE fence line: ``` alone, or ``` plus a language tag. That
+ * is what actually makes one a delimiter, and it is deliberately stricter than
+ * "starts a line" — chunking can move a mid-sentence ``` to the front of a
+ * chunk, and matching on position alone would then invent a fence around
+ * ordinary prose. Being self-contained also means this stays correct without
+ * depending on `format.ts` having run first.
+ *
+ * Tilde fences (~~~) are not repaired — Claude effectively always emits
+ * backticks, and tracking two delimiter styles needs a real state machine
+ * because either can appear as content inside the other.
  */
+const FENCE_LINE = /^[ \t]{0,3}```[a-zA-Z0-9_+-]*[ \t]*$/gm;
+
 function repairSplitFences(chunks: string[]): string[] {
   let open = false;
 
@@ -682,12 +692,11 @@ function repairSplitFences(chunks: string[]): string[] {
     const reopened = open ? "```\n" + chunk : chunk;
 
     // Count delimiters in the chunk as it will actually be sent.
-    const fences = (reopened.match(/```/g) ?? []).length;
-    const endsOpen = (fences % 2 === 1) !== false ? fences % 2 === 1 : false;
-    const closed = endsOpen ? reopened + "\n```" : reopened;
+    const fenceCount = (reopened.match(FENCE_LINE) ?? []).length;
+    const endsOpen = fenceCount % 2 === 1;
 
     open = endsOpen;
-    return closed;
+    return endsOpen ? `${reopened}\n\`\`\`` : reopened;
   });
 }
 

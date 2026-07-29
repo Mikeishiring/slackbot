@@ -5,3 +5,6 @@ node_modules/
 !.env.example
 dist/
 .claude/
+
+# Throwaway probe scripts from analysis agents
+.probe-*
