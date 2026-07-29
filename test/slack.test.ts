@@ -11,6 +11,7 @@ import {
   handleIncomingMessage,
   isChannelAllowed,
   MAX_CHUNK_SIZE,
+  MAX_THREAD_PAGES,
   normalizeMentionText,
   truncateForStream,
   WORKING_REACTION,
@@ -304,6 +305,130 @@ test("handleIncomingMessage returns history newest-last so the agent keeps the r
   // ordering is what matters here.
   assert.equal(history.at(-1)?.text, "message 39");
   assert.equal(history[0]?.text, "message 0");
+});
+
+test("handleIncomingMessage follows the reply cursor to reach the newest messages", async () => {
+  // conversations.replies pages oldest-first, so the messages the question
+  // actually depends on are on the LAST page. A single fetch would return
+  // page 1 and miss them entirely.
+  const pages = [
+    {
+      messages: [{ ts: "001", user: "U_HUMAN", text: "oldest" }],
+      has_more: true,
+      response_metadata: { next_cursor: "cur-2" },
+    },
+    {
+      messages: [{ ts: "002", user: "U_HUMAN", text: "middle" }],
+      has_more: true,
+      response_metadata: { next_cursor: "cur-3" },
+    },
+    {
+      messages: [{ ts: "003", user: "U_HUMAN", text: "newest" }],
+      has_more: false,
+    },
+  ];
+  const cursors: Array<string | undefined> = [];
+
+  const client = {
+    conversations: {
+      replies: async (params: { cursor?: string }) => {
+        cursors.push(params.cursor);
+        return pages[cursors.length - 1] ?? { messages: [] };
+      },
+    },
+    chat: { update: async () => {} },
+    reactions: { add: async () => {}, remove: async () => {} },
+  };
+
+  let history: HistoryMessage[] = [];
+  await handleIncomingMessage(
+    makeInput({
+      client,
+      say: async () => ({ ts: "T1" }),
+      botUserId: "U_BOT",
+      onMessage: async (request) => {
+        history = request.history;
+        return "response";
+      },
+    })
+  );
+
+  assert.deepEqual(cursors, [undefined, "cur-2", "cur-3"]);
+  assert.deepEqual(
+    history.map((m) => m.text),
+    ["oldest", "middle", "newest"]
+  );
+});
+
+test("handleIncomingMessage stops paging when the thread has no more pages", async () => {
+  let calls = 0;
+  const client = {
+    conversations: {
+      replies: async () => {
+        calls += 1;
+        return {
+          messages: [{ ts: "001", user: "U_HUMAN", text: "only" }],
+          has_more: false,
+          response_metadata: { next_cursor: "" },
+        };
+      },
+    },
+    chat: { update: async () => {} },
+    reactions: { add: async () => {}, remove: async () => {} },
+  };
+
+  await handleIncomingMessage(
+    makeInput({
+      client,
+      say: async () => ({ ts: "T1" }),
+      onMessage: async () => "response",
+    })
+  );
+
+  assert.equal(calls, 1, "an empty next_cursor must not trigger another page");
+});
+
+test("handleIncomingMessage bounds paging on a pathological thread", async () => {
+  let calls = 0;
+  const client = {
+    conversations: {
+      replies: async () => {
+        calls += 1;
+        // Never stops advertising more pages.
+        return {
+          messages: [{ ts: `t${calls}`, user: "U_HUMAN", text: `m${calls}` }],
+          has_more: true,
+          response_metadata: { next_cursor: `cur-${calls}` },
+        };
+      },
+    },
+    chat: { update: async () => {} },
+    reactions: { add: async () => {}, remove: async () => {} },
+  };
+
+  const originalWarn = console.warn;
+  const warnings: string[] = [];
+  console.warn = (message: unknown) => {
+    warnings.push(String(message));
+  };
+
+  try {
+    await handleIncomingMessage(
+      makeInput({
+        client,
+        say: async () => ({ ts: "T1" }),
+        onMessage: async () => "response",
+      })
+    );
+  } finally {
+    console.warn = originalWarn;
+  }
+
+  assert.equal(calls, MAX_THREAD_PAGES);
+  assert.ok(
+    warnings.some((w) => /exceeds/.test(w)),
+    "truncated history should be logged, not silent"
+  );
 });
 
 test("handleIncomingMessage strips mentions from thread history", async () => {
