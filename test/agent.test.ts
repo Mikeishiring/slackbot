@@ -258,17 +258,62 @@ test("a tool that denies on context returns its error to the model, not a crash"
   const output = await runConversation(
     request({
       client,
-      runTool: async (_name, _input, context) => {
-        if (context.userId !== "U_ADMIN") throw new Error("Not authorized");
-        return { secret: true };
-      },
+      // The documented gate pattern: RETURN a refusal, don't throw. A returned
+      // value is data, so its reason reaches Claude intact.
+      runTool: async (_name, _input, context) =>
+        context.userId === "U_ADMIN"
+          ? { secret: true }
+          : { error: "Not authorized" },
     })
   );
 
   assert.equal(output, "I'm not able to look that up for you.");
+  assert.match(JSON.stringify(calls[1]?.["messages"]), /Not authorized/);
+});
+
+test("an unexpected tool throw is redacted before it reaches the model", async () => {
+  // Whatever we hand Claude can be quoted into the channel, so a raw error
+  // message could publish a file path, a connection string, or a fragment of
+  // the failing query.
+  const { client, calls } = makeClient([
+    makeStream({
+      stop_reason: "tool_use",
+      content: [{ type: "tool_use", id: "t1", name: "search_items", input: {} }],
+    } as ModelResponse),
+    makeStream({
+      stop_reason: "end_turn",
+      content: [{ type: "text", text: "That lookup isn't working right now." }],
+    } as ModelResponse),
+  ]);
+  const originalError = console.error;
+  const logged: string[] = [];
+  // Errors don't survive JSON.stringify (their fields aren't enumerable), so
+  // capture the rendered form the operator would actually see.
+  console.error = (...args: unknown[]) =>
+    logged.push(args.map((arg) => String(arg)).join(" "));
+
+  try {
+    await runConversation(
+      request({
+        client,
+        runTool: async () => {
+          throw new Error(
+            "connect ECONNREFUSED postgres://admin:hunter2@10.0.0.5:5432/prod"
+          );
+        },
+      })
+    );
+  } finally {
+    console.error = originalError;
+  }
+
   const followUp = JSON.stringify(calls[1]?.["messages"]);
-  assert.match(followUp, /Not authorized/);
+  assert.doesNotMatch(followUp, /hunter2/, "credentials must not reach the model");
+  assert.doesNotMatch(followUp, /ECONNREFUSED/);
+  assert.match(followUp, /search_items tool failed/);
   assert.match(followUp, /"is_error":true/);
+  // The operator still gets the real error.
+  assert.match(logged.join(" "), /hunter2/);
 });
 
 test("runConversation streams text deltas via the onTextDelta callback", async () => {

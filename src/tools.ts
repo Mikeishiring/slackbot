@@ -75,7 +75,35 @@ async function loadSampleFile(): Promise<Item[]> {
     throw new Error("sample-data.json must contain a JSON array of items");
   }
 
-  return parsed as Item[];
+  return rebaseSampleDates(parsed as Item[]);
+}
+
+/**
+ * Slides the sample dates onto the current week, newest first.
+ *
+ * The fixture ships with fixed dates, so "what's new this week?" — the demo
+ * the README tells you to run first — returned nothing once the file aged
+ * past a week. Rebasing keeps the starter's first impression working forever
+ * while leaving the file a plain, readable JSON array.
+ *
+ * Delete this the moment you point `loadSampleFile` at real data: your rows
+ * have real dates and shifting them would be a lie.
+ */
+function rebaseSampleDates(items: Item[]): Item[] {
+  const ordered = [...items].sort(sortByDateDescending);
+  const today = startOfUtcDay(new Date());
+
+  const shifted = new Map<string, string>();
+  ordered.forEach((item, index) => {
+    // Newest lands today, then one item per day going back.
+    shifted.set(item.id, toIsoDate(today - index * MS_PER_DAY));
+  });
+
+  return items.map((item) => ({ ...item, date: shifted.get(item.id) ?? item.date }));
+}
+
+function toIsoDate(msSinceEpoch: number): string {
+  return new Date(msSinceEpoch).toISOString().slice(0, 10);
 }
 
 type ItemSource = () => Promise<Item[]>;

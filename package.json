@@ -18,11 +18,11 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.115.0",
     "@slack/bolt": "^5.0.0",
-    "dotenv": "^17.2.3"
+    "dotenv": "^17.2.3",
+    "tsx": "^4.19.0"
   },
   "devDependencies": {
     "@types/node": "^24.9.1",
-    "tsx": "^4.19.0",
     "typescript": "^5.7.0"
   }
 }

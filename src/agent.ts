@@ -318,7 +318,14 @@ export async function runConversation(
     switch (response.stop_reason) {
       case "end_turn":
       case "stop_sequence":
-        return collectTextContent(response.content);
+        // Fall back to text streamed on earlier turns. A turn that ends with
+        // only thinking or tool blocks would otherwise replace an answer the
+        // user already watched arrive with "I couldn't generate a response."
+        return (
+          collectTextContent(response.content, "") ||
+          streamedText.trim() ||
+          "I couldn't generate a response."
+        );
 
       case "max_tokens":
         // Keep whatever was generated rather than throwing the answer away.
@@ -378,10 +385,15 @@ export async function runConversation(
           content: serializeToolResult(result),
         });
       } catch (error) {
+        // Full detail goes to the operator's logs. Claude gets a bounded,
+        // non-reflective string: whatever we hand it can end up quoted into
+        // the channel, and a raw message may carry a file path, a connection
+        // string, or a fragment of the failing query.
+        console.error(`Tool ${block.name} failed`, error);
         toolResults.push({
           type: "tool_result",
           tool_use_id: block.id,
-          content: `Error: ${error instanceof Error ? error.message : "Unknown error"}`,
+          content: `Error: the ${block.name} tool failed. Tell the user it's unavailable right now.`,
           is_error: true,
         });
       }
@@ -465,6 +477,15 @@ export function serializeToolResult(result: unknown): string {
     : serialized;
 }
 
+/**
+ * Trims a message to a budget, preserving line structure — pasted code and
+ * logs are the common case and collapsing them to one line loses meaning.
+ */
 function normalizeMessageText(text: string, maxChars: number): string {
-  return text.replace(/\s+/g, " ").trim().slice(0, maxChars);
+  return text
+    .replace(/[^\S\n]+/g, " ")
+    .replace(/[ \t]*\n[ \t]*/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim()
+    .slice(0, maxChars);
 }

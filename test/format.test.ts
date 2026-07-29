@@ -73,6 +73,65 @@ test("toSlackMrkdwn handles empty string", () => {
   assert.equal(toSlackMrkdwn(""), "");
 });
 
+test("toSlackMrkdwn neutralizes Slack control tokens", () => {
+  // Anything in angle brackets is a control token to Slack. Unescaped, a tool
+  // row or a quoted message containing <!channel> would make the bot broadcast
+  // to the whole channel on an attacker's behalf.
+  assert.equal(toSlackMrkdwn("<!channel> look"), "&lt;!channel&gt; look");
+  assert.equal(toSlackMrkdwn("<!here> now"), "&lt;!here&gt; now");
+  assert.equal(toSlackMrkdwn("ping <@U123456>"), "ping &lt;@U123456&gt;");
+  assert.equal(
+    toSlackMrkdwn("<!subteam^S123|@team>"),
+    "&lt;!subteam^S123|@team&gt;"
+  );
+});
+
+test("toSlackMrkdwn escapes ampersands and comparisons", () => {
+  assert.equal(toSlackMrkdwn("AT&T"), "AT&amp;T");
+  assert.equal(
+    toSlackMrkdwn("if (x > 3 && y < 5)"),
+    "if (x &gt; 3 &amp;&amp; y &lt; 5)"
+  );
+});
+
+test("toSlackMrkdwn leaves a generated link's URL unescaped", () => {
+  // The URL must keep its raw & or the link breaks; the label is escaped.
+  assert.equal(
+    toSlackMrkdwn("[a & b](https://x.com?p=1&q=2)"),
+    "<https://x.com?p=1&q=2|a &amp; b>"
+  );
+});
+
+test("toSlackMrkdwn does not treat lone asterisks as emphasis", () => {
+  // CommonMark flanking rules: emphasis can't open before whitespace or close
+  // after it. Without them these were corrupted into underscores.
+  assert.equal(toSlackMrkdwn("SELECT * FROM t WHERE a * b"), "SELECT * FROM t WHERE a * b");
+  assert.equal(toSlackMrkdwn("match *.log and 3 * 4 = 12"), "match *.log and 3 * 4 = 12");
+  // ...while real emphasis still converts.
+  assert.equal(toSlackMrkdwn("he said *hi* and 3 * 4"), "he said _hi_ and 3 * 4");
+});
+
+test("toSlackMrkdwn does not let a bare dash swallow the next line", () => {
+  assert.equal(toSlackMrkdwn("-\nnext line"), "-\nnext line");
+  assert.equal(toSlackMrkdwn("- item\n- next"), "• item\n• next");
+});
+
+test("toSlackMrkdwn keeps a # that belongs to the heading text", () => {
+  assert.equal(toSlackMrkdwn("## Sharp C#"), "*Sharp C#*");
+  // The ATX closing run still works when it's whitespace-separated.
+  assert.equal(toSlackMrkdwn("## Foo ##"), "*Foo*");
+});
+
+test("toSlackMrkdwn leaves control tokens inside code alone", () => {
+  // Slack doesn't parse mentions inside code, so escaping there would only
+  // corrupt the snippet.
+  assert.equal(
+    toSlackMrkdwn("```bash\nnpm run check && npm start\n```"),
+    "```bash\nnpm run check && npm start\n```"
+  );
+  assert.equal(toSlackMrkdwn("`a && b`"), "`a && b`");
+});
+
 test("toSlackMrkdwn converts ~~strikethrough~~ to Slack's single tilde", () => {
   assert.equal(toSlackMrkdwn("that plan is ~~dead~~ now"), "that plan is ~dead~ now");
 });
