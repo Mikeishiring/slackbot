@@ -1,5 +1,9 @@
 name: CI
 
+# Least privilege: this workflow only reads the tree.
+permissions:
+  contents: read
+
 on:
   push:
     branches: [main]
@@ -9,6 +13,7 @@ on:
 jobs:
   check:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
@@ -20,6 +25,10 @@ jobs:
         node-version: [22, 24]
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Don't leave GITHUB_TOKEN in .git/config where a postinstall
+          # script from any transitive dependency could read it.
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node-version }}

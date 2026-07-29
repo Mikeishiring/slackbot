@@ -2,7 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { ToolContext } from "../src/agent.js";
-import { runTool, tools, type LocalTool } from "../src/tools.js";
+import {
+  assertUniqueToolNames,
+  runTool,
+  tools,
+  type LocalTool,
+} from "../src/tools.js";
 
 const CTX: ToolContext = { channelId: "C1", threadTs: "1.0", userId: "U_HUMAN" };
 
@@ -193,4 +198,36 @@ test("a LocalTool receives the context as its second argument", () => {
   probe.run({}, ctx);
 
   assert.deepEqual(seen, [ctx]);
+});
+
+test("assertUniqueToolNames rejects a duplicate name", () => {
+  // Otherwise silent: `tools` advertises both, `dispatch` keeps the last, and
+  // Claude calls a name that resolves to the wrong implementation.
+  const schema = { type: "object" as const, properties: {} };
+
+  assert.throws(
+    () =>
+      assertUniqueToolNames([
+        { name: "search", description: "a", input_schema: schema },
+        { name: "search", description: "b", input_schema: schema },
+      ]),
+    /Duplicate tool name: search/
+  );
+});
+
+test("assertUniqueToolNames catches a collision with a server tool", () => {
+  const schema = { type: "object" as const, properties: {} };
+
+  assert.throws(
+    () =>
+      assertUniqueToolNames([
+        { name: "web_search", description: "mine", input_schema: schema },
+        { type: "web_search_20260209", name: "web_search", max_uses: 5 },
+      ]),
+    /Duplicate tool name: web_search/
+  );
+});
+
+test("the shipped tool set has unique names", () => {
+  assert.doesNotThrow(() => assertUniqueToolNames(tools));
 });

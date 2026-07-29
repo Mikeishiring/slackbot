@@ -6,13 +6,17 @@ import type { AgentRequest, HistoryMessage, ToolContext } from "../src/agent.js"
 import {
   chunkText,
   classifyDirectMessage,
+  classifyMention,
   createEventDeduper,
   createThrottledUpdater,
   handleIncomingMessage,
   isChannelAllowed,
+  FALLBACK_ERROR_MESSAGE,
   MAX_CHUNK_SIZE,
   MAX_THREAD_PAGES,
   normalizeMentionText,
+  PLACEHOLDER_TEXT,
+  TRUNCATED_REPLY_MESSAGE,
   truncateForStream,
   WORKING_REACTION,
   type IncomingMessage,
@@ -46,6 +50,40 @@ test("classifyDirectMessage handles, ignores, or flags attachments", () => {
   );
 });
 
+test("classifyMention mirrors the DM path's gates", () => {
+  const base = { text: "<@U1> hi", channel: "C1", ts: "1.0" };
+
+  assert.equal(classifyMention({ ...base }), "handle");
+
+  // Another bot (or a webhook relay) whose text contains our handle would
+  // otherwise drive a paid turn — and dedupe can't stop it, since every
+  // relayed message carries a fresh ts.
+  assert.equal(classifyMention({ ...base, bot_id: "B1" }), "ignore");
+  assert.equal(
+    classifyMention({ ...base, bot_profile: { app_id: "A1" } }),
+    "ignore"
+  );
+
+  // An @-mention with a screenshot used to be answered from the caption.
+  assert.equal(classifyMention({ ...base, files: [{ id: "F1" }] }), "unsupported-attachment");
+  assert.equal(classifyMention({ ...base, subtype: "file_share" }), "unsupported-attachment");
+  assert.equal(classifyMention({ ...base, files: [] }), "handle");
+});
+
+test("both ingress paths agree on the same event shape", () => {
+  // The regression this guards: the two classifiers drifting apart again.
+  const bot = { channel: "C1", ts: "1.0", bot_id: "B1" };
+  assert.equal(classifyMention({ ...bot, text: "hi" }), "ignore");
+  assert.equal(classifyDirectMessage({ ...bot, channel_type: "im", text: "hi" }), "ignore");
+
+  const withFile = { channel: "C1", ts: "1.0", subtype: "file_share" };
+  assert.equal(classifyMention({ ...withFile, text: "look" }), "unsupported-attachment");
+  assert.equal(
+    classifyDirectMessage({ ...withFile, channel_type: "im", text: "look" }),
+    "unsupported-attachment"
+  );
+});
+
 test("isChannelAllowed returns true when no allowlist is set", () => {
   assert.equal(isChannelAllowed(undefined, "C123"), true);
 });
@@ -73,6 +111,53 @@ test("chunkText falls back to hard cut when no good boundary exists", () => {
   const chunks = chunkText("a".repeat(250), 100);
   assert.equal(chunks.length, 3);
   assert.ok(chunks.every((chunk) => chunk.length <= 100));
+});
+
+test("chunkText preserves all content and respects the size limit", () => {
+  // An invariant, not a pinned example. chunkText trims both halves of every
+  // split and drops empty chunks, so an edit that silently loses a chunk
+  // passes the three example tests above — this is the one that would catch it.
+  const shapes = [
+    "word ".repeat(2_000),
+    "a".repeat(5_000),
+    Array.from({ length: 200 }, (_v, i) => `para ${i}`).join("\n\n"),
+    Array.from({ length: 400 }, (_v, i) => `line ${i}`).join("\n"),
+    `intro\n\n\`\`\`js\n${"const x = 1;\n".repeat(300)}\`\`\`\n\noutro`,
+    `${"lead ".repeat(400)}\n\`\`\`\n${"code\n".repeat(200)}\`\`\``,
+  ];
+
+  for (const [index, text] of shapes.entries()) {
+    const chunks = chunkText(text, 500);
+
+    assert.ok(
+      chunks.every((chunk) => chunk.length <= 500),
+      `shape ${index}: a chunk exceeded the limit`
+    );
+
+    // Every non-whitespace character survives, ignoring fences we re-added.
+    const strip = (value: string) => value.replace(/```/g, "").replace(/\s+/g, "");
+    assert.equal(
+      chunks.map(strip).join(""),
+      strip(text),
+      `shape ${index}: content was lost or duplicated`
+    );
+  }
+});
+
+test("chunkText closes and reopens a code fence it splits", () => {
+  const text = `Here:\n\`\`\`js\n${"const x = 1;\n".repeat(200)}\`\`\`\ndone`;
+  const chunks = chunkText(text, 500);
+
+  assert.ok(chunks.length > 1, "expected the fence to be split");
+
+  for (const [index, chunk] of chunks.entries()) {
+    const fences = (chunk.match(/```/g) ?? []).length;
+    assert.equal(
+      fences % 2,
+      0,
+      `chunk ${index} has an unbalanced fence and would render broken:\n${chunk.slice(0, 80)}`
+    );
+  }
 });
 
 test("truncateForStream preserves short text and truncates long text with suffix", () => {
@@ -509,6 +594,47 @@ test("handleIncomingMessage falls back to non-streaming say() when placeholder p
   assert.deepEqual(sent.map((m) => m.text), ["…", "response"]);
   assert.equal(updates.length, 0);
   assert.deepEqual(reactions, [`+${WORKING_REACTION}`, `-${WORKING_REACTION}`]);
+});
+
+test("a failed follow-up chunk does not erase the chunk already delivered", async () => {
+  // chunk 1 lands in the placeholder; chunk 2 fails. Falling into the outer
+  // catch would call sendErrorReply, which overwrites the placeholder — so a
+  // 90%-delivered answer would become no answer at all.
+  const { client, updates } = makeChatClient();
+  const sent: string[] = [];
+  const longResponse = `${"para1 ".repeat(700).trim()}\n\n${"para2 ".repeat(700).trim()}`;
+  const originalConsoleError = console.error;
+  console.error = () => {};
+
+  try {
+    await handleIncomingMessage(
+      makeInput({
+        client,
+        say: async (message) => {
+          sent.push(message.text);
+          if (message.text === PLACEHOLDER_TEXT) return { ts: "T1" };
+          // Every follow-up chunk fails, as a rate limit would.
+          throw new Error("ratelimited");
+        },
+        onMessage: async () => longResponse,
+      })
+    );
+  } finally {
+    console.error = originalConsoleError;
+  }
+
+  assert.ok(
+    !updates.includes(FALLBACK_ERROR_MESSAGE),
+    "the delivered chunk must not be replaced by the generic error"
+  );
+  assert.ok(
+    updates.some((text) => text.startsWith("para1")),
+    "chunk 1 should still be in the placeholder"
+  );
+  assert.ok(
+    sent.includes(TRUNCATED_REPLY_MESSAGE),
+    "the user should be told the reply is incomplete"
+  );
 });
 
 test("createThrottledUpdater fires the first call immediately and coalesces bursts", async () => {
