@@ -24,13 +24,14 @@ export const PLACEHOLDER_TEXT = "…";
 /** The emoji shown while the bot is working. */
 export const WORKING_REACTION = "eyes";
 /**
- * `conversations.replies` pages forward from the thread parent, so this single
- * page is the *oldest* 100 replies — there is no pagination here. For threads
- * under 100 messages that is the whole thread, which covers normal use; past
- * that, the newest messages are not fetched. How much of what we do fetch
- * reaches the model is agent.ts's MAX_THREAD_HISTORY_MESSAGES.
+ * `conversations.replies` pages forward from the thread parent, oldest first,
+ * so the recent messages we actually want are on the LAST page. We follow the
+ * cursor to the end and keep the tail. How much of that tail reaches the model
+ * is agent.ts's MAX_THREAD_HISTORY_MESSAGES.
  */
 export const THREAD_FETCH_LIMIT = 100;
+/** Bounds API cost on pathological threads. 10 x 100 = 10,000 replies. */
+export const MAX_THREAD_PAGES = 10;
 export const STREAM_UPDATE_INTERVAL_MS = 1_500;
 /**
  * Our own safety margin, not a Slack limit — `chat.postMessage` accepts more
@@ -61,6 +62,8 @@ interface ThreadHistoryMessage {
 
 interface ThreadHistoryResult {
   messages?: ThreadHistoryMessage[];
+  has_more?: boolean;
+  response_metadata?: { next_cursor?: string };
 }
 
 export interface SlackChatClient {
@@ -96,6 +99,7 @@ export interface SlackHistoryClient extends SlackChatClient, SlackReactionsClien
       channel: string;
       ts: string;
       limit: number;
+      cursor?: string;
     }) => Promise<ThreadHistoryResult>;
   };
 }
@@ -297,26 +301,53 @@ async function getThreadHistory(
   botUserId?: string
 ): Promise<HistoryMessage[]> {
   try {
-    const result = await client.conversations.replies({
-      channel,
-      ts: threadTs,
-      limit: THREAD_FETCH_LIMIT,
-    });
+    const messages: ThreadHistoryMessage[] = [];
+    let cursor: string | undefined;
 
-    return (result.messages ?? [])
-      .filter((message) => !message.ts || !excludeTs.has(message.ts))
-      .flatMap((message): HistoryMessage[] => {
-        const text = normalizeMentionText(message.text ?? "");
-        if (!text) return [];
-
-        return [
-          { role: isOwnMessage(message, botUserId) ? "assistant" : "user", text },
-        ];
+    for (let page = 0; page < MAX_THREAD_PAGES; page++) {
+      const result: ThreadHistoryResult = await client.conversations.replies({
+        channel,
+        ts: threadTs,
+        limit: THREAD_FETCH_LIMIT,
+        ...(cursor ? { cursor } : {}),
       });
+
+      messages.push(...(result.messages ?? []));
+
+      cursor = result.response_metadata?.next_cursor || undefined;
+      if (!result.has_more || !cursor) {
+        return toHistory(messages, excludeTs, botUserId);
+      }
+    }
+
+    // Only reachable on a thread deeper than MAX_THREAD_PAGES x THREAD_FETCH_LIMIT.
+    // We hold the oldest pages, so the recent context the question depends on is
+    // missing — say so rather than answering from stale history in silence.
+    console.warn(
+      `Thread ${channel}/${threadTs} exceeds ${MAX_THREAD_PAGES * THREAD_FETCH_LIMIT} replies; using the oldest portion`
+    );
+    return toHistory(messages, excludeTs, botUserId);
   } catch (error) {
     console.error("Failed to load thread history", error);
     return [];
   }
+}
+
+function toHistory(
+  messages: ThreadHistoryMessage[],
+  excludeTs: ReadonlySet<string>,
+  botUserId?: string
+): HistoryMessage[] {
+  return messages
+    .filter((message) => !message.ts || !excludeTs.has(message.ts))
+    .flatMap((message): HistoryMessage[] => {
+      const text = normalizeMentionText(message.text ?? "");
+      if (!text) return [];
+
+      return [
+        { role: isOwnMessage(message, botUserId) ? "assistant" : "user", text },
+      ];
+    });
 }
 
 /**

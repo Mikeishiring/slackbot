@@ -18,7 +18,7 @@ Clone. Set 3 keys. Run.
 
 - **Word-overlap search** — natural queries like "series b funding" find the right items, not just exact substrings. Title matches rank higher.
 - **👀 Processing indicator + streaming replies** — the bot reacts with :eyes: the instant your message arrives, posts a placeholder reply, then streams Claude's text into it as it's generated. Two signals: "I see you" and "answer forming now."
-- **Thread context** — follow-up questions work naturally. The bot reads the most recent thread history before responding, and correctly tells its own past replies apart from other bots' messages.
+- **Thread context** — follow-up questions work naturally. The bot pages `conversations.replies` to the end of the thread (it returns oldest-first, so the recent messages are on the last page), and correctly tells its own past replies apart from other bots' messages.
 - **Tool loop** — Claude picks the right tool, reads the results, and replies. Up to 10 model turns per message, with oversized tool payloads truncated so one big result can't crowd out the conversation.
 - **Slack-safe formatting** — markdown is translated to Slack's dialect, and code spans and fenced blocks pass through untouched so `**pointers**` and `x ** 2` survive intact.
 - **Long-response chunking** — answers longer than 3,500 characters auto-split on paragraph boundaries and post as a chain of replies in the same thread. (That's our margin, not Slack's hard cap — it keeps replies clear of truncation.)
